@@ -1,0 +1,34 @@
+name: analyse_dpe
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - pandas
+  - fiona
+  - matplotlib
+  - tqdm
+  - spyder
+  - jupyter
+  - cartopy
+  - xarray
+  - netCDF4
+  - geopandas
+  - rioxarray
+  - html5lib
+  - numpy
+  - pyogrio
+  - dask
+  - dask-geopandas
+  - seaborn
+  - bs4
+  - eppy-core
+  - xmltodict
+  - openpyxl
+  - unidecode
+  - geopy
+  - shapely
+  - fastparquet
+  - pytables
+  - pyarrow
+  - utm
+  - sqlite
