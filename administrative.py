@@ -175,11 +175,11 @@ def main():
         output_folder = os.path.join('output',today)
         os.makedirs(output_folder, exist_ok=True)
         
-        dict_dep = {d:np.random.random() for d in France().departements}
+        dict_dep = {d:np.random.random() for d in France().departements} 
         draw_departement_map(dict_dep,output_folder,save='test')
         
     tac = time.time()
     print(f'Done in {tac-tic:.2f}s.')
     
-if __name__ == '__main__':
+if __name__ == '__main__':  
     main()

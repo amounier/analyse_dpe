@@ -274,7 +274,7 @@ def main():
     
     #%% Test de téléchargement des données BDNB d'un département
     if True:
-        dep = Departement(24)
+        dep = Departement(91)
         print(dep)
         
         download_bdnb(dep.code)

@@ -17,6 +17,8 @@ etiquette_colors_dict = {k: tuple(map(lambda x: x/255, v)) for k,v in etiquette_
 
 etiquette_ep_dict = {'A':[0,70],'B':[70,110],'C':[110,180],'D':[180,250],'E':[250,330],'F':[330,420],'G':[420,np.inf]}
 
+etiquette_ep_seuils = [70, 110, 180, 250, 330, 420]
+
 
 def get_extent():
     extent = [-5, 9.8, 41.3, 51.3]
@@ -29,7 +31,7 @@ def blank_national_map():
     
     # ax.add_feature(cfeature.OCEAN, color='lightgrey',zorder=2)
     # ax.add_feature(cfeature.LAND, color='w',zorder=1)
-    # ax.add_feature(cfeature.COASTLINE,zorder=5)
+    ax.add_feature(cfeature.COASTLINE,zorder=5)
     # ax.add_feature(cfeature.BORDERS,zorder=3)
     return fig,ax
 
