@@ -27,7 +27,7 @@ from PIL import Image
 from datetime import date
 from pyogrio.errors import DataSourceError
 
-from administrative import Departement
+from administrative import Departement, France
 
 
 def download_bdnb(dep_code, force=False):
@@ -37,7 +37,7 @@ def download_bdnb(dep_code, force=False):
     Parameters
     ----------
     dep_code : str
-        code du département (conforme avec la nomenclature de la BDNB.
+        code du département (conforme avec la nomenclature de la BDNB).
     force : boolean, optional
         Force le retéléchargement même si présent sur disque. The default is False.
 
@@ -272,12 +272,20 @@ def main():
     output_folder = os.path.join('output',today)
     os.makedirs(output_folder, exist_ok=True)
     
-    #%% Test de téléchargement des données BDNB d'un département
-    if True:
+    #%% Téléchargement des données BDNB d'un département
+    if False:
         dep = Departement(91)
         print(dep)
         
         download_bdnb(dep.code)
+        
+    #%% Téléchargement des données BDNB de tous les départements (France hexagonale)    
+    if True:
+        france = France()
+        for dep in france.departements :
+            print(dep)
+            download_bdnb(dep.code)
+
     
     #%% Test d'une carte locale
     if False:
