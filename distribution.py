@@ -11,12 +11,13 @@ import numpy as np
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy.stats import beta
+from scipy.stats import beta, zscore # attention, beta (variable aléatoire) =/= sc.beta (fonction)
 from scipy.optimize import curve_fit
+import scipy.special as sc 
 from datetime import date
 
-from administrative import Departement  # on importe la classe
-from download import get_bdnb  # on importe la fonction
+from administrative import Departement, France  
+from download import get_bdnb
 from utils import etiquette_colors_dict,etiquette_ep_dict,etiquette_ep_seuils
 
 
@@ -104,7 +105,57 @@ def formatage_dpe_data(dep_code, window_size=50):
 
 
 
-def plot_dpe_distribution(path, dep_code, save=True, plot_mean=True, plot_median=False, window_size=50, plot_fit=True, plot_curve_fit=True, max_xlim=600) :
+def fit_dpe_data(dep_code, method):
+    """
+    Fit de la distribution des DPE avec plusieurs méthodes possibles.
+
+    Parameters
+    ----------
+    dep_code : str
+        code du département.
+    method : str, optional ('beta.fit' ou 'curve_fit' ou 'curve_fit_mean')
+        Nom de la méthode utilisée pour "fitter". The default is 'beta.fit'.
+
+    Returns
+    -------
+    pdf : array
+        Fonction de densité de probabilité des consommations d'énergie primaire.
+    """
+    
+    dpe_data = get_dpe_consumption(dep_code) # prend du temps
+    dpe_data = dpe_data.dropna()
+    dpe_data = dpe_data.map(round)
+    counter_dict = dict(dpe_data.conso_5_usages_ep_m2.value_counts())
+    counter_dict_sorted = {k: v for k, v in sorted(counter_dict.items(), key=lambda item: item[0])}
+    
+    # methode beta.fit a ne pas utiliser a priori
+    if method=='beta.fit':
+        a, b, loc, scale = beta.fit(dpe_data["conso_5_usages_ep_m2"]) # beta.fit prend comme argument des datas de type array_like
+        print('Paramètres du beta fit (a, b, loc, scale)', a, b, loc, scale)
+        pdf = beta.pdf(list(counter_dict_sorted.keys()), a, b, loc=loc, scale=scale) # probability density function
+        
+        
+    # methode à privilégier
+    if method=='curve_fit':
+        x_data = np.array(list(counter_dict_sorted.keys()))  # on a array of int et pas of float
+        filtre = zscore(x_data)<3
+        # filtre = x_data<1000
+        
+        x_data = x_data[filtre]
+        print(x_data.max())
+        
+        y_data_norm = np.array(list(counter_dict_sorted.values()))/nb_dpe
+        y_data_norm = y_data_norm[filtre]
+        y_data_norm = y_data_norm/y_data_norm.sum()
+        #XXXX 
+        #pdf = 
+        
+        
+    return pdf
+
+
+
+def plot_dpe_distribution(path, dep_code, save=True, plot_mean=True, plot_median=True, window_size=50, plot_fit=True, plot_curve_fit=True, max_xlim=600) :
     """
     graphe de la distribution des DPE, en indiquant les limites entre catégories.
 
@@ -167,44 +218,75 @@ def plot_dpe_distribution(path, dep_code, save=True, plot_mean=True, plot_median
         plt.plot(formatage_dpe_data(dep_code, window_size)["conso_5_usages_ep_m2_arrondie"], formatage_dpe_data(dep_code, window_size)["nb_obs_mediane"], "r", label='mediane', linewidth = 0.7)
     
     
-    # tracé fit des données avec une loi beta
+    # Tracé fit de toutes les données dpe_data["conso_5_usages_ep_m2"] avec une loi beta : fonction scipy.beta.fit 
     if plot_fit: 
-        a, b, loc, scale = beta.fit(dpe_data["conso_5_usages_ep_m2"]) # beta.fit prend comme argument des datas de type array_like
-        print('beta fit', a, b, loc, scale)
-        pdf = beta.pdf(formatage_dpe_data(dep_code, window_size)["conso_5_usages_ep_m2_arrondie"], a, b, loc=loc, scale=scale) # probability density function
-        #plt.plot(counter_df_sorted["conso_5_usages_ep_m2_arrondie"], pdf, "k", label='beta fit', linewidth = 1)
-        
-        plt.plot(formatage_dpe_data(dep_code, window_size)["conso_5_usages_ep_m2_arrondie"], pdf*(nb_dpe), "k--", label='beta fit', linewidth = 1)
-        plt.legend()
-        
-        
+        pdf = fit_dpe_data(dep_code, method='beta.fit')
+        plt.plot(list(counter_dict_sorted.keys()), pdf*nb_dpe, "k--", label='beta fit', linewidth = 1)
+            
+    # Tracé fit de toutes les données : fonction curve_fit avec un modèle de loi beta    
     if plot_curve_fit: 
-        x_data = np.array(list(counter_dict_sorted.keys()))
-        y_data = np.array(list(counter_dict_sorted.values()))/nb_dpe
-        x_min, x_max = x_data.min(), x_data.max()
-        x_normalized = (x_data - x_min) / (x_max - x_min)
+        x_data = np.array(list(counter_dict_sorted.keys()))  # on a array of int et pas of float
         
-        #print(x_normalized)
+        # Filtrage des valeurs extrêmes de consommations d'énergie primaire
+        filtre = zscore(x_data)<3 
         
-        plt.plot(list(counter_dict_sorted.keys()), list(counter_dict_sorted.values()), "b", label='données', linewidth = 0.7)
+        x_data = x_data[filtre]
+        print(f'Le curve_fit ne prend pas en compte les DPE supérieurs à {x_data.max()} kWh/m2 (Z score > 3)')
+        
+        y_data_norm = np.array(list(counter_dict_sorted.values()))/nb_dpe
+        y_data_norm = y_data_norm[filtre]
+        y_data_norm = y_data_norm/y_data_norm.sum() # afin que l'aire sous la courbe soit bien =1
+        
+        
+        '''
+        # Fonction qui ne marche pas jsp pourquoi :
         
         def beta_pdf(x, a, b):
-            return np.power(x,a-1) * np.power(1-x,b-1)
-
-        param, cov = curve_fit(beta_pdf, x_normalized, y_data)
+            x_min, x_max = x_data.min(), x_data.max()
+            x_norm = (x - x_min) / (x_max - x_min)
+            #print(x_norm)
+            return np.power(x_norm,a-1) * np.power(1-x_norm,b-1) / (sc.beta(a, b))
+        
+        # en enlevant loc :
+        
+        first_guess = (4, 4)
+        param, cov = curve_fit(beta_pdf, x_data, y_data_norm, first_guess, method='trf', bounds=(0, +np.inf))  # la méthode trf fonctionne bien 
         a, b = param
-        print('Valeurs des paramètres de la loi beta :', a, b, cov)
-        #plt.figure()
-        #plt.plot(x_normalized, y_data)
-        #plt.plot(x_normalized, beta_pdf(x_normalized, a, b), '--', label='curve_fit')
-        pdf = beta_pdf(x_normalized, a, b)
-        plt.plot(x_data, pdf*(nb_dpe), label='curve_fit')
-        #plt.xlim([0,0.4])
+        print('Paramètres de la loi beta (a, b, cov) :', a, b, cov)
+        
+        
+        pdf = beta_pdf(x_data, a, b)
+        
+        '''
+        
+        scale = x_data.max() # TODO: a inclure dans beta_pdf sous forme scale = x.max() ?
+        
+        
+        def beta_pdf(x, a, b, loc):
+            x_norm = (x - loc) / scale
+            x_norm = x_norm.clip(min=0,max=None)
+            res = np.power(x_norm,(a-1)) * np.power((1-x_norm),(b-1)) /sc.beta(a,b)/scale
+            return res
     
+        
+        first_guess = (4, 4, 0)
+        param, cov = curve_fit(beta_pdf, x_data, y_data_norm, first_guess, method='trf', bounds=(0, +np.inf))  # la méthode trf fonctionne bien 
+        a, b, loc = param
+        print('Paramètres de la loi beta (a, b, loc, cov) :', a, b, loc, cov)
+
+        pdf = beta_pdf(x_data, a, b, loc)
+
+
+        plt.plot(x_data, pdf*(nb_dpe), label='curve_fit')
+
+
+
     if save:
         save_path = os.path.join(path,'distribution_dpe_{}.png'.format(dep_code))
         if plot_fit:
             save_path = os.path.join(path,'distribution_dpe_{}_fit.png'.format(dep_code))
+        # if old_built_filter:
+            #XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
         plt.savefig(save_path, bbox_inches='tight')
 
 
@@ -216,7 +298,8 @@ def plot_dpe_distribution(path, dep_code, save=True, plot_mean=True, plot_median
     
 
 
-def calcul_bunching(dep_code, method, itv_bunching=5):
+
+def calcul_bunching(path, dep_code, method, itv_bunching, max_xlim = 600):
     """
     Calcul du bunching avec plusieurs méthodes possibles.
     
@@ -224,9 +307,10 @@ def calcul_bunching(dep_code, method, itv_bunching=5):
     ----------
     method : str ('AMP' ou 'diff_beta')
         Nom de la méthode utilisée pour calculer le bunching.
-    itv_bunching : int, optional ? XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-        Taille de l'intervalle en-dessous et au-dessus des seuils sur lequel on calcule le bunching. The default is 5 kWh/m2 
-       
+    itv_bunching : int XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+        Attention : l'intervalle peut être soit à gauche du seuil, soit de part et d'autres du seuil selon les méthodes. The default is 5 kWh/m2 
+        Methode 'AMP' : taille de l'intervalle en-dessous et au-dessus des seuils sur lequel on calcule le bunching. 
+        Methode 'diff_beta' : taille de l'intervalle à gauche de chaque seuil (utiliser plutôt 10 kWh/m2)
     Returns
     -------
     bunching : panda DataFrame ? Dictionnaire ? choisir XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
@@ -238,23 +322,56 @@ def calcul_bunching(dep_code, method, itv_bunching=5):
     dpe_data = get_dpe_consumption(dep_code)
     dpe_data = dpe_data.dropna()
     dpe_data = dpe_data.map(round)
+    nb_dpe = len(dpe_data)
     counter_dict = dict(dpe_data.conso_5_usages_ep_m2.value_counts())
     counter_dict_sorted = {k: v for k, v in sorted(counter_dict.items(), key=lambda item: item[0])}
     
-    if method=='AMP': # méthode "Average Manipulation Density" (Civel et al.)
-         bunching = []
-         for seuil in etiquette_ep_seuils:
+    bunching = {"A/B": 0., "B/C": 0., "C/D": 0., "D/E": 0., "E/F": 0., "F/G": 0.}
+    
+    if method=='AMP': # méthode "Average Manipulation Density" (Civel et al.). Utilise itv_bunching
+        
+        for k, seuil in etiquette_ep_seuils.items():
             nb_droite = sum([int(v) for k,v in counter_dict_sorted.items() if k > seuil and k <= seuil+itv_bunching])
             nb_gauche = sum([int(v) for k,v in counter_dict_sorted.items() if k > seuil-itv_bunching and k <= seuil])
-            AMP = (nb_gauche - nb_droite) / (nb_gauche+nb_droite)  # average manipulation density 
-            bunching.append(AMP)
+            AMP = (nb_gauche - nb_droite) / (nb_gauche+nb_droite)  # average manipulation density # on pourrait aussi diviser par nb tot DPE (AJa et al) ? 
+            AMP = round(AMP,3)
+            bunching[k] = AMP
             
-    if method=='diff_beta': # différence d'aire sous la courbe entre les données réelles et le beta fit sur toutes les données
-        bunching = []
-        #plt.plot(formatage_dpe_data(dep_code, window_size)["conso_5_usages_ep_m2_arrondie"], formatage_dpe_data(dep_code, window_size)["nb_observations"]-BETA FIT)
-        # completer
+        print(f'Bunching (méthode AMP) pour {departement}, avec un intervalle de +-{itv_bunching} kWh/m2 autour des seuils : ', bunching)
+
             
-    print(f'Bunching pour {departement}, avec un intervalle de +-{itv_bunching} kWh/m2 autour des seuils : ', bunching)
+    if method=='diff_beta': # différence d'aire sous la courbe entre les données réelles et le beta.fit sur toutes les données. Plot et enregistre la figure
+        pdf = fit_dpe_data(dep_code, method='beta.fit')
+        difference = list(counter_dict_sorted.values()) - pdf*nb_dpe
+        difference_dict =  dict(zip(counter_dict_sorted.keys(), difference)) # dictionnaire qui lie l'écart au beta.fit des DPE à leur conso annuelle d'ep associée
+        
+        # Calcul du bunching
+        # méthode part excessive standardisée (Aja et al.) -> "part des DPE qui sont excessifs sur l’intervalle de 10 kWh de consommation d’énergie à gauche de chaque seuil"
+        for k, seuil in etiquette_ep_seuils.items():
+            part_excess = sum([float(v) for k,v in difference_dict.items() if k > seuil-itv_bunching and k <= seuil])  # omme des DPEs excessifs à gauche du seuil
+            part_excess = part_excess/nb_dpe   # normalisation pour obtenir la proportion des DPEs qui seraient excessifs
+            part_excess = round(part_excess,3)
+            bunching[k] = part_excess
+        
+        print(f"Bunching (méthode part excessive) pour {departement}, sur l'intervalle de {itv_bunching} kWh/m2 à gauche de chaque seuil : ", bunching)
+        
+
+        # Tracé de l'écart entre les données réelles et le beta.fit sur toutes les données
+        plt.figure()
+        plt.plot(list(counter_dict_sorted.keys()), difference, linewidth = 0.7)
+        
+        plt.xlim([0,max_xlim])
+        plt.hlines(y=0, xmin=0, xmax=max_xlim, color='k', linestyles='dashed') # tracé de l'axe y=0
+        plt.title(f"Ecart au beta.fit des DPE ({departement.name} - {departement.code})")
+        plt.ylabel("Nombre de DPE de différence")
+        plt.xlabel("Consommation annuelle en énergie primaire (kWh.m$^{-2}$)")
+        plt.xticks(ticks=[int(x) for x in list(set(list(np.asarray(list(etiquette_ep_dict.values())).flatten()))) if not np.isinf(x)] + [max_xlim])
+        
+        # Enregistrement de la figure
+        save_path = os.path.join(path,'ecart_beta.fit_{}.png'.format(dep_code))
+        plt.savefig(save_path, bbox_inches='tight')
+
+    
     
     return bunching
 
@@ -271,26 +388,42 @@ def main():
     output_folder = os.path.join('output',today)
     os.makedirs(output_folder, exist_ok=True)
     
+    dep = Departement(91)
     
-    #test
+    #test distrib beta
     if False: 
         a=2
         b=5
         
         x = np.linspace(0, 2, num=40)
-        f = np.power(x,a-1) * np.power(1-x,b-1)
+        f = np.power(x,a-1) * np.power(1-x,b-1) / sc.beta(a,b)
         
         plt.plot(x,f)
     
     # tracé de la distribution des dpe du département
     if True:
-        dep = Departement(91)
         #dpe_data = get_dpe_consumption(dep.code) # cette ligne ne sert a rien car déjà dans plot_dpe_distribution ?
-        plot_dpe_distribution(output_folder,dep.code)
+        plot_dpe_distribution(output_folder,dep.code, plot_mean=True, plot_median=True, plot_fit=True, plot_curve_fit=True)
         
     # calcul du bunching
     if False:
-        calcul_bunching(dep.code, method='AMP', itv_bunching=5)
+        #calcul_bunching(output_folder, dep.code, method='AMP', itv_bunching=5)
+        calcul_bunching(output_folder, dep.code, method='diff_beta', itv_bunching=10)
+     
+        
+    # Calcul bunching pour tous les départements
+    if False:
+        france = France()
+        dict_dep_bunching = {d:0. for d in France().departements} # initialisation du dictionnaire du bunching des départements
+        
+        for dep in france.departements[:10] :
+            dep_code = dep.code
+            print(dep_code)
+            bunching_dep = calcul_bunching(output_folder, dep_code, method='diff_beta', itv_bunching=10, max_xlim = 600)  # calcul du bunching : choix de la méthode et de ses paramètres
+            bunching_dep_sum = sum([b for k,b in bunching_dep.items() if k in ...])  # on additionne les bunchings des 6 seuils
+            dict_dep_bunching['dep'] = bunching_dep_sum
+            
+        print(dict_dep_bunching)
         
     tac = time.time()
     print(f'Done in {tac-tic:.2f}s.')

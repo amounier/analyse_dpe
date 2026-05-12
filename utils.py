@@ -17,7 +17,9 @@ etiquette_colors_dict = {k: tuple(map(lambda x: x/255, v)) for k,v in etiquette_
 
 etiquette_ep_dict = {'A':[0,70],'B':[70,110],'C':[110,180],'D':[180,250],'E':[250,330],'F':[330,420],'G':[420,np.inf]}
 
-etiquette_ep_seuils = [70, 110, 180, 250, 330, 420]
+#etiquette_ep_seuils = [70, 110, 180, 250, 330, 420] # old, format liste
+etiquette_ep_seuils = {"A/B": 70, "B/C": 110, "C/D": 180, "D/E": 250, "E/F": 330, "F/G": 420}
+
 
 
 def get_extent():
