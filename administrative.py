@@ -170,13 +170,15 @@ def main():
     tic = time.time()
     
     # test de la carte des départements
-    if True:
+    if False:
         today = pd.Timestamp(date.today()).strftime('%Y%m%d')
         output_folder = os.path.join('output',today)
         os.makedirs(output_folder, exist_ok=True)
         
         dict_dep = {d:np.random.random() for d in France().departements} 
         draw_departement_map(dict_dep,output_folder,save='test')
+        
+
         
     tac = time.time()
     print(f'Done in {tac-tic:.2f}s.')
