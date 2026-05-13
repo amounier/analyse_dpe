@@ -186,9 +186,12 @@ def fit_dpe_data(dep_code, method='curve_fit'):
             res = np.power(x_norm,(a-1)) * np.power((1-x_norm),(b-1)) /sc.beta(a,b)/scale
             return res
     
-
-        first_guess = (4, 12, 10)
-        param, cov = curve_fit(beta_pdf, x_data, y_data_norm, first_guess, method='trf', bounds=(0, +np.inf))  # la méthode trf fonctionne bien 
+        alpha_first_guess = 4
+        loc_first_guess = 0
+        beta_first_guess =  alpha_first_guess / ((x_data - loc_first_guess)/x_data.max()).mean() - alpha_first_guess
+        first_guess = (alpha_first_guess, beta_first_guess, loc_first_guess) 
+        
+        param, cov = curve_fit(beta_pdf, x_data, y_data_norm, first_guess, method='trf', bounds=(0, +np.inf), maxfev=10000)  # la méthode trf fonctionne bien 
         a, b, loc = param # todo: renvoyer les paramètres
         print('Paramètres de la loi beta du curve_fit (a, b, loc, cov) :', a, b, loc, cov)
 
@@ -256,7 +259,7 @@ def plot_dpe_distribution(path, dep_code, save=True, plot_mean=True, plot_median
     ax.set_ylabel("Nombre d'observations")
     ax.set_xlabel("Consommation annuelle en énergie primaire (kWh.m$^{-2}$)")
     ax.set_xticks(ticks=[int(x) for x in list(set(list(np.asarray(list(etiquette_ep_dict.values())).flatten()))) if not np.isinf(x)] + [max_xlim])
-    
+    # todo: rajouter 
     
     # Tracé de la moyenne/médiane glissante 
     if plot_mean:
@@ -277,7 +280,8 @@ def plot_dpe_distribution(path, dep_code, save=True, plot_mean=True, plot_median
         pdf = fit_dpe_data(dep_code, method='curve_fit')['y_beta_curve_fit']
         plt.plot(x_data,pdf*nb_dpe, "k--", label='curve_fit')
 
-    
+    ax.legend()    
+
     if save:
         save_path = os.path.join(path,'distribution_dpe_{}.png'.format(dep_code))
         if plot_fit or plot_curve_fit : # todo: enlever et rajouter old_built_filter
@@ -287,7 +291,6 @@ def plot_dpe_distribution(path, dep_code, save=True, plot_mean=True, plot_median
         plt.savefig(save_path, bbox_inches='tight')
 
 
-    ax.legend()
     plt.show()
     plt.close()
     
@@ -328,16 +331,33 @@ def calcul_bunching(dep_code, method, itv_bunching, plot_ecart, path, max_xlim =
     
     if method=='AMP': # méthode "Average Manipulation Density" (Civel et al.). Utilise itv_bunching
         
+        fit_dpe_data_df = fit_dpe_data(dep_code, method='curve_fit')
+        fit_dpe_data_df['y_difference'] = fit_dpe_data_df.y_data_norm - fit_dpe_data_df.y_beta_curve_fit
+        fit_dpe_data_df['y_difference_abs'] =  fit_dpe_data_df['y_difference'].abs()
+        
+        bunching_df = pd.DataFrame(index=[0]) 
+        
         for k, seuil in etiquette_ep_seuils.items():
-            nb_droite = sum([int(v) for k,v in counter_dict_sorted.items() if k > seuil and k <= seuil+itv_bunching])
-            nb_gauche = sum([int(v) for k,v in counter_dict_sorted.items() if k > seuil-itv_bunching and k <= seuil])
-            AMP = (nb_gauche - nb_droite) / (nb_gauche+nb_droite)  # average manipulation density # on pourrait aussi diviser par nb tot DPE (AJa et al) ? 
-            AMP = round(AMP,3)
-            bunching[k] = AMP
+            # Création d'un DataFrame filtré sur l'intervalle à gauche du seuil
+            fit_dpe_data_df_filtered = fit_dpe_data_df[(fit_dpe_data_df.x_data> seuil-itv_bunching) & (fit_dpe_data_df.x_data <= seuil + itv_bunching)]
+            
+            # Ajout d'une colonne correspondante au seuil dans le bunching DataFrame 
+            bunching_df[f'{k}_method_{method}'] = fit_dpe_data_df_filtered['y_difference_abs'].sum()
+            
+# =============================================================================
+#     
+#         for k, seuil in etiquette_ep_seuils.items():
+#             nb_droite = sum([int(v) for k,v in counter_dict_sorted.items() if k > seuil and k <= seuil+itv_bunching])
+#             nb_gauche = sum([int(v) for k,v in counter_dict_sorted.items() if k > seuil-itv_bunching and k <= seuil])
+#             AMP = (nb_gauche - nb_droite) / (nb_gauche+nb_droite)  # average manipulation density # on pourrait aussi diviser par nb tot DPE (AJa et al) ? 
+#             AMP = round(AMP,3)
+#             bunching[k] = AMP
+# =============================================================================
             
         print(f'Bunching (méthode AMP) pour {departement}, avec un intervalle de +-{itv_bunching} kWh/m2 autour des seuils : ', bunching)
 
-        return bunching
+        return bunching_df
+    # todo modifier pour que ce redonne comme methode diff_beta et faire les calculs sur les densité et pas les nb d'observations (pour comparer entre les départements)
             
     if method=='diff_beta': # différence d'aire sous la courbe entre les données réelles et le curve_fit sur les données, dans les intervalles à gauche des seuils. Plot et enregistre la figure
 
@@ -349,7 +369,7 @@ def calcul_bunching(dep_code, method, itv_bunching, plot_ecart, path, max_xlim =
         # Calcul du bunching 
         # méthode part excessive standardisée (Aja et al.) -> "part des DPE qui sont excessifs sur l’intervalle de 10 kWh de consommation d’énergie à gauche de chaque seuil"
         
-        bunching_df = pd.DataFrame({'dep_code': [departement.codint]})
+        bunching_df = pd.DataFrame(index=[0]) 
         
         for k, seuil in etiquette_ep_seuils.items():
             # Création d'un DataFrame filtré sur l'intervalle à gauche du seuil
@@ -358,7 +378,7 @@ def calcul_bunching(dep_code, method, itv_bunching, plot_ecart, path, max_xlim =
             # Ajout d'une colonne correspondante au seuil dans le bunching DataFrame 
             bunching_df[f'{k}_method_diff_beta'] = fit_dpe_data_df_filtered['y_difference'].sum()
             
-        bunching_df.round(3) # todo: ne marche pas ???
+        #bunching_df.round(3) # todo: ne marche pas ??? de toute facon on ne veut pas perdre d'info f'{var:.2f}'
         pd.options.display.max_columns = None
         print(f"Bunching (méthode part excessive) pour {departement}, sur l'intervalle de {itv_bunching} kWh/m2 à gauche de chaque seuil : \n", bunching_df)
         
@@ -368,10 +388,10 @@ def calcul_bunching(dep_code, method, itv_bunching, plot_ecart, path, max_xlim =
         if plot_ecart:
             # Tracé de l'écart entre les données réelles et le beta.fit sur toutes les données
             plt.figure()
-            plt.plot(fit_dpe_data_df.x_data, nb_dpe*fit_dpe_data_df.y_difference, linewidth = 0.7)
+            plt.plot(fit_dpe_data_df.x_data, fit_dpe_data_df.y_difference, linewidth = 0.7)
             
             plt.xlim([0,max_xlim])
-            plt.hlines(y=0, xmin=0, xmax=max_xlim, color='k', linestyles='dashed') # tracé de l'axe y=0
+            plt.hlines(y=0, xmin=0, xmax=max_xlim, color='k', linestyles='dashed', zorder=-1) # tracé de l'axe y=0
             plt.title(f"Ecart entre la distribution des DPE et la distribution beta\n({departement.name} - {departement.code})")
             plt.ylabel("Nombre de DPE de différence")
             plt.xlabel("Consommation annuelle en énergie primaire (kWh.m$^{-2}$)")
@@ -422,9 +442,10 @@ def calcul_bunching(dep_code, method, itv_bunching, plot_ecart, path, max_xlim =
         return bunching
 
 
+#%%
 
 
-def calcul_bunching_france(path, method, itv_bunching, max_xlim = 600):
+def calcul_bunching_france(path, method, itv_bunching, max_xlim = 600, verbose=False):
     
     # todo: rajouter def fonction
     
@@ -437,39 +458,57 @@ def calcul_bunching_france(path, method, itv_bunching, max_xlim = 600):
     existing_files = os.listdir(output_folder_bunching)
     
     # Définition du nom du fichier final
-    save_name = f'dict_bunching_france_method_{method}_itv_bunching_{itv_bunching}_kWh.csv'
+    save_name = f'bunching_france_method_{method}_itv_bunching_{itv_bunching}_kWh.csv'
     #if old_built_filter:
         #save_name = save_name.replace('.csv','_old_built.csv')
     
     # Enregistrement du dictionnaire du bunching sur tous les départements en csv    
     if save_name not in existing_files:
         france = France()
-        dict_dep_bunching = {d:0. for d in france.departements} # initialisation du dictionnaire du bunching des départements
-        #print('dict_dep AVANT \n' , dict_dep_bunching)
+        dict_dep_bunching = {'dep_code':[]}
+        for k in etiquette_ep_seuils.keys():
+            dict_dep_bunching[f'{k}_method_{method}'] = []
         
         for dep in france.departements :
             dep_code = dep.code
             print(dep)
             bunching_dep = calcul_bunching(dep_code, method, itv_bunching, plot_ecart=False, path=path, max_xlim=max_xlim) # calcul du bunching : choix de la méthode et de ses paramètres
-            bunching_dep = bunching_dep.drop(columns=['dep_code'])
-            bunching_dep_sum = bunching_dep.sum(axis=1) # on somme le bunching de l'ensemble des 6 seuils
-            # modifier : garder un dictionnaire de dictionnaire ?
-            print('bunching_dep_sum', bunching_dep_sum)
+            dict_dep_bunching['dep_code'].append(dep_code)
+            for k in etiquette_ep_seuils.keys():
+                dict_dep_bunching[f'{k}_method_{method}'].append(bunching_dep[f'{k}_method_{method}'].values[0])
+          
+        france_bunching = pd.DataFrame().from_dict(dict_dep_bunching)
+        
+        france_bunching = france_bunching.set_index('dep_code')
+        
+        # transforme dictionnaire en DataFrame avec from.dict 
             
             # old : 
             #bunching_dep_sum = sum([b for k,b in bunching_dep.items() if k in ...])  # on additionne les bunchings des 6 seuils
             
-            dict_dep_bunching[dep] = bunching_dep_sum.iloc[0]
-            
-        print('dict_dep APRES', dict_dep_bunching)
-        #dict_dep_bunching.to_csv(os.path.join(output_folder_bunching, save_name))
+            #dict_dep_bunching[dep] = bunching_dep_sum.iloc[0]
+        if verbose:
+            print('dict_dep APRES', dict_dep_bunching)
+        
+        # todo :  creer un panda et pas un dictionnaire
+        #france_bunching.to_csv(os.path.join(output_folder_bunching, save_name))
         
     #else:
         #dict_dep_bunching = pd.read_csv(os.path.join(output_folder_bunching, save_name))
         
-    return dict_dep_bunching
+    return france_bunching
 
 
+# def fonction_affichage:
+    # prend en entrée df (read csv ou le calcule)
+    # zip parcourt deux listes de la même manière en meme temps
+    # dict_dep_bunching = {Departement(dep_code):bunching_AB for dep_code, bunching_AB in zip(df.dep_code, df.bunching_AB)}
+    # définir l'index du df : ici c'est le département df  = df.set_index('dep_code') comme ça quand on fait des calculs il prend pas en compte l'index (somme sur les colonnes par ex)
+    # creer nouvelle colonne dans le df qui correspond a somme_bunching
+    # attention axis=1 pour moyenne sur les départements et pas les bunching
+    # pas grave si on enregistre pas les colonnes sommes"
+    
+    
 #%% ===========================================================================
 # script principal
 # =============================================================================
@@ -481,22 +520,24 @@ def main():
     output_folder = os.path.join('output',today)
     os.makedirs(output_folder, exist_ok=True)
     
-    dep = Departement(32)
+    dep = Departement('2A')
     
     
     # tracé de la distribution des dpe du département
-    if False:
+    if True:
         #dpe_data = get_dpe_consumption(dep.code) # cette ligne ne sert a rien car déjà dans plot_dpe_distribution ?
-        plot_dpe_distribution(output_folder,dep.code, plot_mean=True, plot_median=True, plot_fit=False, plot_curve_fit=True, max_xlim=600)
+        plot_dpe_distribution(output_folder,dep.code, plot_mean=True, plot_median=True, plot_fit=False, plot_curve_fit=True, max_xlim=600) # todo: specifier 
         
         
     # calcul du bunching du département
-    if True:
+    if False:
         #calcul_bunching(output_folder, dep.code, method='AMP', itv_bunching=5)
-        bunching_dep = calcul_bunching(dep.code, method='diff_beta', itv_bunching=10, plot_ecart = True, path=output_folder)
-        bunching_dep = bunching_dep.drop(columns=['dep_code'])
+        bunching_dep = calcul_bunching(dep.code, method='AMP', itv_bunching=10, plot_ecart = True, path=output_folder)
+        #bunching_dep = bunching_dep.drop(columns=['dep_code'])
         bunching_dep_sum = bunching_dep.sum(axis=1) # on somme le bunching de l'ensemble des 6 seuils
         # modifier : garder un dictionnaire de dictionnaire ?
+        
+
         print('bunching_dep_sum', bunching_dep_sum)
             
         
@@ -505,11 +546,32 @@ def main():
         today = pd.Timestamp(date.today()).strftime('%Y%m%d')
         output_folder = os.path.join('output',today)
         os.makedirs(output_folder, exist_ok=True)
+        method='AMP'
         
-        dict_dep_bunching = calcul_bunching_france(output_folder, method='diff_beta', itv_bunching=10, max_xlim=600)
-        draw_departement_map(dict_dep_bunching,output_folder, cbar_max=0.04,save="Carte du bunching sur l'intervalle\n(Somme sur l'ensemble des seuils, méthode diff_beta)")
+        france_bunching = calcul_bunching_france(output_folder, method=method, itv_bunching=10, max_xlim=600)
+        
+        # Somme sur l'ensemble des 6 seuils
+        france_bunching[f'Somme_method_{method}'] = france_bunching.sum(axis=1)
+        dict_dep_bunching = {Departement(dep_code):bunching_somme for dep_code, bunching_somme in zip(france_bunching.index, france_bunching[f'Somme_method_{method}'])}
+        draw_departement_map(dict_dep_bunching,output_folder,save=f"Carte du bunching sur l'intervalle (Somme sur l'ensemble des seuils, méthode {method})", map_title=f"Carte du bunching sur l'intervalle\n(Somme sur l'ensemble des seuils, méthode {method})")
+        
+        
+        # un dictionnaire par cartes, mais autant de méthodes qu'on veut a partir 
+        
+        # Moyenne des methodes
+        france_bunching[f'Moyenne_method_{method}'] = france_bunching.mean(axis=1)
+        dict_dep_bunching = {Departement(dep_code):bunching_mean for dep_code, bunching_mean in zip(france_bunching.index, france_bunching[f'Moyenne_method_{method}'])}
+        draw_departement_map(dict_dep_bunching,output_folder,save=f"Carte du bunching sur l'intervalle (Moyenne sur l'ensemble des seuils, méthode {method})", map_title=f"Carte du bunching sur l'intervalle\n(Moyenne sur l'ensemble des seuils, méthode {method})")
+      
+        
+        # Bunching sur le seuil E/F seulement
+        #dict_dep_bunching = {Departement(dep_code):bunching_somme for dep_code, bunching_somme in zip(france_bunching.index, france_bunching[f'Somme_method_{method}'])}
+
+
+        #france_bunching = france_bunching_method1.join(france_bunching_method2)
+        # pour pouvoir faire des stats sur l'ensemble des methodes
+        
        
-        
         
     tac = time.time()
     print(f'Done in {tac-tic:.2f}s.')

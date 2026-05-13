@@ -82,7 +82,7 @@ class France:
         
         
 def draw_departement_map(dict_dep,figs_folder,cbar_min=0,cbar_max=1.,
-                         automatic_cbar_values=False, cbar_label=None, 
+                         automatic_cbar_values=True, cbar_label=None, 
                          map_title=None,save=None,cmap=None,figax=None,
                          hide_cbar=False,alpha=None,hatches=None,
                          cbar_format=None,cbar_norm=None,cbar_ticks=None,
