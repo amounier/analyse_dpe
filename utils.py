@@ -15,7 +15,7 @@ import numpy as np
 etiquette_colors_dict = {'A':(0, 156, 109),'B':(82, 177, 83),'C':(120, 189, 118),'D':(244, 231, 15),'E':(240, 181, 15),'F':(235, 130, 53),'G':(215, 34, 31)}
 etiquette_colors_dict = {k: tuple(map(lambda x: x/255, v)) for k,v in etiquette_colors_dict.items()}
 
-etiquette_ep_dict = {'A':[0,70],'B':[70,110],'C':[110,180],'D':[180,250],'E':[250,330],'F':[330,420],'G':[420,np.inf]}
+etiquette_ep_dict = {'A':[0,70],'B':[70,110],'C':[110,180],'D':[180,250],'E':[250,330],'F':[330,420],'G':[420,np.inf]} # todo:  les valeurs des seuils sot inclues dans la meilleure classe non ?
 
 #etiquette_ep_seuils = [70, 110, 180, 250, 330, 420] # old, format liste
 etiquette_ep_seuils = {"A/B": 70, "B/C": 110, "C/D": 180, "D/E": 250, "E/F": 330, "F/G": 420}

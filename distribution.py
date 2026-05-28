@@ -16,8 +16,10 @@ from scipy.optimize import curve_fit
 import scipy.special as sc 
 from datetime import date
 from sklearn.metrics import r2_score
+import seaborn as sns
+# sns.set_theme()
 
-from administrative import Departement, France, draw_departement_map  
+from administrative import  list_dep_code, Departement, France, draw_departement_map
 from download import get_bdnb
 from utils import etiquette_colors_dict,etiquette_ep_dict,etiquette_ep_seuils
 
@@ -52,9 +54,10 @@ def get_dpe_consumption(dep_code, old_built_filter=False):
     # Enregistrement des conso_5_usages en csv    
     if save_name not in existing_files:
         dpe_data, _ , _ = get_bdnb(dep_code)
-        dpe_data = dpe_data[dpe_data.type_dpe=='dpe arrêté 2021 3cl logement'][['conso_5_usages_ep_m2','conso_5_usages_ef_m2','periode_construction_dpe','surface_habitable_logement']].compute() 
+        dpe_data = dpe_data[dpe_data.type_dpe=='dpe arrêté 2021 3cl logement'][['conso_5_usages_ep_m2','conso_5_usages_ef_m2','periode_construction_dpe','surface_habitable_logement','date_etablissement_dpe']].compute() 
         if old_built_filter: 
             dpe_data = dpe_data[dpe_data.periode_construction_dpe.isin(['avant 1948','1948-1974'])]
+        #dpe_data = dpe_data[date_etablissement_dpe < 2024] # todo: filtre qui enlève DPE après 2024
         #dpe_data = dpe_data[dpe_data.surface_habitable_logement > 40.] # todo: filtre qui enlève petits logements (en dessous de 40 m2) , garde Nan ou pas ?
         dpe_data = dpe_data[['conso_5_usages_ep_m2','conso_5_usages_ef_m2']]
         dpe_data.to_csv(os.path.join(output_folder, save_name))
@@ -66,7 +69,7 @@ def get_dpe_consumption(dep_code, old_built_filter=False):
 
 
 
-def formatage_dpe_data(dep_code, window_size=30, old_built_filter=False):
+def formatage_dpe_data(dep_code, window_size, old_built_filter=False):
     """
     Créé un DataFrame de la distribution des données DPE du département dep_code, avec une colonne du nombre d'observation moyen 
     et une colonne du nombre d'observation médian pour chaque valeur de consommation d'énergie primaire
@@ -84,6 +87,7 @@ def formatage_dpe_data(dep_code, window_size=30, old_built_filter=False):
     -------
     counter_df_sorted : panda DataFrame
         DataFrame du nombre d'observation exact, moyen glissant et médian glissant de chaque valeur entière de conso_5_usages_ep_m2 dans le département
+        Colonnes :  conso_5_usages_ep_m2_arrondie  |  nb_observations  |  nb_obs_moyenne  |  nb_obs_mediane
     """
     
     dpe_data = get_dpe_consumption(dep_code, old_built_filter=old_built_filter) # c'est ca qui prend du temps
@@ -93,13 +97,13 @@ def formatage_dpe_data(dep_code, window_size=30, old_built_filter=False):
     counter_dict_sorted = {k: v for k, v in sorted(counter_dict.items(), key=lambda item: item[0])}
     counter_df_sorted = pd.DataFrame(list(counter_dict_sorted.items()), columns=["conso_5_usages_ep_m2_arrondie","nb_observations"]) # df trié par conso_ep (besoin d'un DataFrame pour utiliser rolling)
     
-    #print(counter_df_sorted)
+    # print(counter_df_sorted)
     
     # tracé des données à fit
     # plt.plot(list(counter_dict_sorted.keys()), list(counter_dict_sorted.values()), "k", label='données', linewidth = 0.5)
     
     # calcul de la moyenne/médiane glissante
-    rolling_dpe = counter_df_sorted['nb_observations'].rolling(window=window_size, min_periods=1, center=True)
+    rolling_dpe = counter_df_sorted['nb_observations'].rolling(window=window_size, min_periods=1, center=True) 
     counter_df_sorted["nb_obs_moyenne"] = rolling_dpe.mean()  # ajout colonne moyenne dans le DataFrame
     counter_df_sorted["nb_obs_mediane"] = rolling_dpe.median()  # ajout colonne mediane dans le DataFrame
     
@@ -229,7 +233,7 @@ def fit_dpe_data(dep_code, method='curve_fit', old_built_filter=False, verbose=T
         
 # =============================================================================
 #         # calcul du R2 avec la moyenne des données
-#         y_moyenne = formatage_dpe_data(dep_code)["nb_obs_moyenne"]/nb_dpe
+#         y_moyenne = formatage_dpe_data(dep_code, window_size=window_size, old_built_filter=old_built_filter)["nb_obs_moyenne"]/nb_dpe
 #         y_moyenne = y_moyenne[filtre]
 #         y_moyenne = y_moyenne/y_moyenne.sum()
 #         print('somme y_moyenne', y_moyenne.sum())
@@ -246,7 +250,7 @@ def fit_dpe_data(dep_code, method='curve_fit', old_built_filter=False, verbose=T
 #%% 
 
 
-def plot_dpe_distribution(path, dep_code, save=True, plot_mean=True, plot_median=True, window_size=50, plot_fit=False, plot_curve_fit=True, old_built_filter=False, max_xlim=600) :
+def plot_dpe_distribution(path, dep_code, save, plot_mean, plot_median, window_size, plot_fit=False, plot_curve_fit=True, old_built_filter=False, max_xlim=600) :
     """
     graphe de la distribution des DPE, en indiquant les limites entre catégories.
 
@@ -316,7 +320,7 @@ def plot_dpe_distribution(path, dep_code, save=True, plot_mean=True, plot_median
         plt.plot(formatage_dpe_data(dep_code, window_size, old_built_filter=old_built_filter)["conso_5_usages_ep_m2_arrondie"], formatage_dpe_data(dep_code, window_size, old_built_filter=old_built_filter)["nb_obs_mediane"], "r", label='mediane', linewidth = 0.7)
     
     
-    # Tracé fit de toutes les données dpe_data["conso_5_usages_ep_m2"] avec une loi beta : fonction scipy.beta.fit 
+    # Tracé fit de toutes les données dpe_data["conso_5_usages_ep_m2"]beta_centre_abs avec une loi beta : fonction scipy.beta.fit 
     if plot_fit: 
         pdf, _, _ = fit_dpe_data(dep_code, method='beta.fit', old_built_filter=old_built_filter)
         plt.plot(list(counter_dict_sorted.keys()), pdf*nb_dpe, label='beta fit', linewidth = 1)
@@ -349,7 +353,7 @@ def plot_dpe_distribution(path, dep_code, save=True, plot_mean=True, plot_median
 #%%
 
 
-def calcul_bunching(dep_code, method, itv_bunching, plot_ecart, path, old_built_filter, max_xlim = 600, verbose=False):
+def calcul_bunching(dep_code, method, itv_bunching, window_size, plot_ecart, path, old_built_filter, max_xlim = 600, verbose=False):
     """
     Calcul du bunching dans le département dep_code avec plusieurs méthodes possibles.
     
@@ -357,19 +361,22 @@ def calcul_bunching(dep_code, method, itv_bunching, plot_ecart, path, old_built_
     ----------
     dep_code : str
         code du departement.
-    method : str ('AMP' ou 'diff_beta_gauche' ou 'diff_beta_centre_abs')
-        Nom de la méthode utilisée pour calculer le bunching.
+    method : str ('AMP' ou 'diff_beta_gauche' ou 'diff_beta_centre_abs' ou 'diff_moyenne')
+        nom de la méthode utilisée pour calculer le bunching.
     itv_bunching : int
         Attention : l'intervalle peut être soit à gauche du seuil, soit de part et d'autre du seuil selon les méthodes. 
         Methode 'AMP' : taille de l'intervalle de part et d'autre des seuils sur lequel on calcule le bunching. 
         Methode 'diff_beta_gauche' : taille de l'intervalle à gauche de chaque seuil (utiliser plutôt 10 kWh/m2 comme Aja et al.).
         Methode 'diff_beta_centre_abs' : taille de l'intervalle de part et d'autre des seuils.
+        Methode 'diff_moyenne' : taille de l'intervalle de part et d'autre des seuils
+    window_size : int
+        taille de la fenêtre de glissement pour le rolling (moyenne glissante). Utile uniquement pour la méthode 'diff_moyenne'.
     plot_ecart : boolean
         tracé de l'écart entre les données et le fit.
     path : str
-        chemin de sauvegarde.
+        chemin de sauvegarde des figures.
     old_built_filter : boolean
-        filtrage : on ne garde que les logements construits avant 1974. The default is False.
+        filtrage : on ne garde que les logements construits avant 1974.
     max_xlim : int, optional
         limite du graphe. The default is 600.    
         
@@ -523,6 +530,68 @@ def calcul_bunching(dep_code, method, itv_bunching, plot_ecart, path, old_built_
           plt.savefig(save_path, bbox_inches='tight')
 
         return bunching_df
+    
+    
+    
+    if method =='diff_moyenne': # difference entre les données et la moyenne glissante 
+        
+    # old version : en utilisant fit_dpe_data mais pas pertinent car pas besoin du fit
+# =============================================================================
+#         fit_dpe_data_df, r2_value, param, nb_dpe_filtre = fit_dpe_data(dep_code, method='curve_fit', old_built_filter=old_built_filter)
+#         fit_dpe_data_df['y_moyenne_norm'] = formatage_dpe_data(dep_code=dep_code, window_size=window_size, old_built_filter=old_built_filer)["nb_obs_moyenne"]  # moyenne glissante sur une fenêtre de taille window_size
+#         fit_dpe_data_df['y_diff_moyenne'] = fit_dpe_data_df.y_data_norm - fit_dpe_data_df.y_moyenne
+#        
+# =============================================================================
+        
+        dpe_data_df = formatage_dpe_data(dep_code=dep_code, window_size=window_size, old_built_filter=old_built_filter)  # moyenne glissante sur une fenêtre de taille window_size
+        dpe_data_df['y_diff_moyenne_norm'] = (dpe_data_df.nb_observations - dpe_data_df.nb_obs_moyenne)/nb_dpe
+        dpe_data_df['y_diff_moyenne_norm_abs'] = dpe_data_df['y_diff_moyenne_norm'].abs() 
+
+        
+        bunching_df = pd.DataFrame(index=[0]) # initialisation d'un DataFrame
+        
+        for k, seuil in etiquette_ep_seuils.items():
+            # Création d'un DataFrame filtré sur l'intervalle à +-{itv_bunching} du seuil
+            dpe_data_df_filtered = dpe_data_df[(dpe_data_df.conso_5_usages_ep_m2_arrondie > seuil-itv_bunching) & (dpe_data_df.conso_5_usages_ep_m2_arrondie <= seuil + itv_bunching)]
+            
+            # Ajout d'une colonne correspondante au seuil dans le bunching DataFrame 
+            bunching_df[f'{k}_method_{method}'] = dpe_data_df_filtered['y_diff_moyenne_norm_abs'].sum()
+                
+        print(f'Bunching (méthode {method}, window_size {window_size} kWh) pour {departement}, avec un intervalle de +-{itv_bunching} kWh/m2 autour des seuils, old_built_filter = {old_built_filter} : \n', bunching_df)
+
+        
+      # Tracé de l'écart entre les données réelles et le fit sur toutes les données
+        if plot_ecart:
+          plt.figure()
+          plt.plot(dpe_data_df.conso_5_usages_ep_m2_arrondie, dpe_data_df.y_diff_moyenne_norm, linewidth = 0.7)
+          
+          plt.xlim([0,max_xlim])
+          #plt.ylim([-0.003, 0.009]) # correspond aux bornes pour la Haute-Marne 52 (max bunching)
+          plt.ylim([-0.002, 0.006]) # correspond aux bornes pour la Vendée 85 (max somme bunching)
+          plt.hlines(y=0, xmin=0, xmax=max_xlim, color='k', linestyles='dashed', zorder=-1) # tracé de l'axe y=0 en arrière-plan
+          
+          # remplissage de l'aire du bunching
+          for seuil in etiquette_ep_seuils.values():
+                 condition_alentours_seuils = (dpe_data_df.conso_5_usages_ep_m2_arrondie > seuil - itv_bunching) & (dpe_data_df.conso_5_usages_ep_m2_arrondie <= seuil + itv_bunching)
+                 plt.fill_between(dpe_data_df.conso_5_usages_ep_m2_arrondie, y1=dpe_data_df.y_diff_moyenne_norm, y2=0, where=condition_alentours_seuils, alpha=0.3, color='red')
+                 
+          if old_built_filter:
+              plt.title(f"Ecart entre la distribution des DPE (avant 1974) et la moyenne glissante\n({departement.name} - {departement.code})")
+          else :
+              plt.title(f"Ecart entre la distribution des DPE et la moyenne glissante\n({departement.name} - {departement.code})") # todo: rajt window_size partout
+          plt.ylabel("Nombre de DPE de différence, normalisé")
+          plt.xlabel("Consommation annuelle en énergie primaire (kWh.m$^{-2}$)")
+          plt.xticks(ticks=[int(x) for x in list(set(list(np.asarray(list(etiquette_ep_dict.values())).flatten()))) if not np.isinf(x)] + [max_xlim])
+          
+          # Enregistrement de la figure
+          if old_built_filter:
+              save_path = os.path.join(path,f'ecart_moy_gliss_sur_{window_size}_kWh_{dep_code}_method_{method}_itv_{itv_bunching}_kWh_old_built.png')  
+          else:
+              save_path = os.path.join(path,f'ecart_moy_gliss_sur_{window_size}_kWh_{dep_code}_method_{method}_itv_{itv_bunching}_kWh.png')   
+          plt.savefig(save_path, bbox_inches='tight')
+
+        
+        return bunching_df
             
     
     
@@ -569,14 +638,14 @@ def calcul_bunching(dep_code, method, itv_bunching, plot_ecart, path, old_built_
 #%%
 
 
-def calcul_bunching_france(path, method, itv_bunching, old_built_filter, max_xlim = 600, verbose=False):
+def calcul_bunching_france(path, method, itv_bunching, window_size, old_built_filter, max_xlim = 600, verbose=False):
     """
     Calcul le bunching sur l'ensemble des départements de l'hexagone avec plusieurs méthodes possibles.
 
     Parameters
     ----------
     path : str
-        Chemin de sauvegarde des FIGURES issues de calcul_bunching (écart données/fit) (et pas du dictionnaire bunching).
+        Chemin de sauvegarde des FIGURES issues de calcul_bunching (écart données/fit) (et pas du dictionnaire bunching). N'est pas utile en pratique car par défaut, plot_ecart=False.
     method : str ('AMP' ou 'diff_beta_gauche' ou 'diff_beta_centre_abs')
         Nom de la méthode utilisée pour calculer le bunching.
     itv_bunching : int
@@ -584,8 +653,11 @@ def calcul_bunching_france(path, method, itv_bunching, old_built_filter, max_xli
         Methode 'AMP' : taille de l'intervalle de part et d'autre des seuils sur lequel on calcule le bunching. 
         Methode 'diff_beta_gauche' : taille de l'intervalle à gauche de chaque seuil (utiliser plutôt 10 kWh/m2 comme Aja et al.).
         Methode 'diff_beta_centre_abs' : taille de l'intervalle de part et d'autre des seuils.
+        Methode 'diff_moyenne' : taille de l'intervalle de part et d'autre des seuils
+    window_size : int
+        taille de la fenêtre de glissement pour le rolling (moyenne glissante). Utile uniquement pour la méthode 'diff_moyenne'.
     old_built_filter : boolean
-        filtrage : on ne garde que les logements construits avant 1974. The default is False.
+        filtrage : on ne garde que les logements construits avant 1974.
     max_xlim : int, optional
         limite du graphe. The default is 600.    
     verbose : boolean, optional
@@ -605,9 +677,10 @@ def calcul_bunching_france(path, method, itv_bunching, old_built_filter, max_xli
     
     # Définition du nom du fichier final
     save_name = f'france_bunching_method_{method}_itv_bunching_{itv_bunching}_kWh.csv'
+    if method=='diff_moyenne':
+        save_name = save_name.replace('itv',f'windowsize_{window_size}_kWh_itv')
     if old_built_filter:
         save_name = save_name.replace('.csv','_old_built.csv')
-    
     
     if save_name not in existing_files:
         france = France()
@@ -621,7 +694,7 @@ def calcul_bunching_france(path, method, itv_bunching, old_built_filter, max_xli
         for dep in france.departements :
             dep_code = dep.code
             print(dep)
-            bunching_dep = calcul_bunching(dep_code, method, itv_bunching, plot_ecart=False, path=path, old_built_filter=old_built_filter, max_xlim=max_xlim) # calcul du bunching de chaque département
+            bunching_dep = calcul_bunching(dep_code, method, itv_bunching, window_size, plot_ecart=False, path=path, old_built_filter=old_built_filter, max_xlim=max_xlim) # calcul du bunching de chaque département
             dict_france_bunching['dep_code'].append(dep_code)
             # Implémentation de la liste des bunchings du département
             for k in etiquette_ep_seuils.keys():
@@ -662,8 +735,127 @@ def calcul_bunching_france(path, method, itv_bunching, old_built_filter, max_xli
     
     
     
+def calcul_nb_dpe(old_built_filter):
+    '''
+    Calcule le nb de DPE total dans chaque département.  # todo: modif , irl nb_dpe_filtre utilisé pour le curve_fit
+
+    Parameters
+    ----------
+    old_built_filter : boolean
+        filtrage : on ne garde que les logements construits avant 1974.
+
+    Returns
+    -------
+    dict_dep_nb_dpe_filtre : dictionnaire (compatible avec draw_departement_map)
+        {Ain (01) (Departement) : nombre de DPE (np.int), etc...}
+    '''
     
-#%% ===========================================================================
+    france = France()
+    dict_dep_nb_dpe_filtre = {d:0. for d in france.departements} 
+    
+    for dep in france.departements :
+        dep_code = dep.code
+        print(dep)
+        _, _, _, nb_dpe_filtre = fit_dpe_data(dep_code, method='curve_fit', old_built_filter=old_built_filter)  # attention : si on utilisé méthode AMP ou diff_moyenne, pas forcément pertinent de filtrer
+        dict_dep_nb_dpe_filtre[dep] = nb_dpe_filtre 
+    
+    return dict_dep_nb_dpe_filtre 
+    
+
+#%%
+
+
+def df_compare_methods(seuils, path, old_built_filter): # todo : rajouter diff_beta_gauche ! et changer nb_dpe_filtre
+    """
+    Création d'un DataFrame du bunching selon différentes méthodes.
+
+    Parameters
+    ----------
+    seuils : list
+        liste des seuils à prendre en compte pour le calcul de la somme du bunching.
+    path : str
+        Chemin de sauvegarde des FIGURES issues de calcul_bunching (écart données/fit) (et pas du dictionnaire bunching). N'est pas utile en pratique car par défaut, plot_ecart=False.
+    old_built_filter : boolean
+        filtrage : on ne garde que les logements construits avant 1974.
+
+    Returns
+    -------
+    df_compare : pandas DataFrame
+        Bunching par départements selon différentes méthodes de calcul
+        Colonnes : dep_code (index)  |  département  |  nb_dpe_filtre  |  Méthode AMP  |  Méthode diff_beta_centre_abs  |  Méthode diff_moyenne
+    """
+
+    # Création d'un DataFrame permettant de comparer différentes méthodes de calcul du bunching, somme sur certains seuils
+    # Attention, les valeurs d'itv bunching et de window_size ont été fixée pour chacune des méthodes
+
+    
+    # Initialisation du DataFrame de comparaison des méthodes
+    df_compare = pd.DataFrame(index=list_dep_code) 
+    df_compare['département'] = [Departement(f'{n}') for n in df_compare.index] # todo : à supprimer ?
+    
+    
+    # Ajout d'une colonne nombre de DPE # todo : ne pas forcément filtrer le nb_DPE ? utile que pour méthode diff_beta_centre_abs
+    dict_dep_nb_dpe_filtre = calcul_nb_dpe(old_built_filter)
+    df_compare['nb_dpe_filtre'] = dict_dep_nb_dpe_filtre.values()
+    
+    # Ajout d'une colonne méthode AMP
+    
+    france_bunching = calcul_bunching_france(path, method='AMP', itv_bunching=5, window_size = 50, old_built_filter=old_built_filter, max_xlim=600)
+    
+    # implémentation d'une liste du nom exact des colonnes de france_bunching à sélectionner
+    noms_colonnes_seuils = []
+    for seuil in seuils:
+        colonne_seuil = [colonne for colonne in france_bunching.columns if colonne.startswith(f'{seuil}')]
+        nom_colonne = colonne_seuil[0]
+        noms_colonnes_seuils.append(nom_colonne)
+
+    france_bunching_cut = france_bunching.filter(items = noms_colonnes_seuils)  
+    
+    df_compare['Méthode AMP'] = france_bunching_cut.sum(axis=1) # on somme sur les lignes des colonnes conservées
+
+
+
+    # Ajout d'une colonne méthode diff_beta_centre_abs
+    
+    france_bunching = calcul_bunching_france(path, method='diff_beta_centre_abs', itv_bunching=5, window_size = 50, old_built_filter=old_built_filter, max_xlim=600)
+
+    # implémentation d'une liste du nom exact des colonnes de france_bunching à sélectionner
+    noms_colonnes_seuils = []
+    for seuil in seuils:
+        colonne_seuil = [colonne for colonne in france_bunching.columns if colonne.startswith(f'{seuil}')]
+        nom_colonne = colonne_seuil[0]
+        noms_colonnes_seuils.append(nom_colonne)
+        
+    france_bunching_cut = france_bunching.filter(items = noms_colonnes_seuils)  
+        
+    df_compare['Méthode diff_beta_centre_abs'] = france_bunching_cut.sum(axis=1) # on somme sur les lignes des colonnes conservées
+
+
+
+    # Ajout d'une colonne méthode diff_moyenne
+    
+    france_bunching = calcul_bunching_france(path, method='diff_moyenne', itv_bunching=5, window_size = 50, old_built_filter=old_built_filter, max_xlim=600)
+   
+    # implémentation d'une liste du nom exact des colonnes de france_bunching à sélectionner
+    noms_colonnes_seuils = []
+    for seuil in seuils:
+        colonne_seuil = [colonne for colonne in france_bunching.columns if colonne.startswith(f'{seuil}')]
+        nom_colonne = colonne_seuil[0]
+        noms_colonnes_seuils.append(nom_colonne)
+        
+    france_bunching_cut = france_bunching.filter(items = noms_colonnes_seuils)  
+        
+    df_compare['Méthode diff_moyenne'] = france_bunching_cut.sum(axis=1) # on somme sur les lignes des colonnes conservées
+   
+    
+# todo : ajouter un save du df_compare ?
+
+    
+    return df_compare
+   
+   
+        
+#%% ===========================================================================wwwwwwwwwwwwwwwwwwww
 # SCRIPT PRINCIPAL
 # =============================================================================
 
@@ -680,8 +872,9 @@ def main():
     output_folder = os.path.join('output',today)
     os.makedirs(output_folder, exist_ok=True)
     
-    dep = Departement('69')
-    old_built_filter = False
+    dep = Departement('48')
+    old_built_filter = True
+    window_size = 50  # fenêtre de la moyenne glissante (rolling de la méthode 'diff_moyenne')
     
     
     # DISTRIBUTION DES DPE
@@ -689,7 +882,7 @@ def main():
     # tracé de la distribution des dpe du département
     if False:
         #dpe_data = get_dpe_consumption(dep.code) # cette ligne ne sert a rien car déjà dans plot_dpe_distribution ?
-        plot_dpe_distribution(output_folder,dep.code, plot_mean=True, plot_median=False, plot_fit=False, plot_curve_fit=True, old_built_filter=old_built_filter, max_xlim=600)
+        plot_dpe_distribution(output_folder,dep.code, save=True, plot_mean=True, plot_median=False, window_size = window_size, plot_fit=False, plot_curve_fit=True, old_built_filter=old_built_filter, max_xlim=600)
     
     
         
@@ -698,25 +891,47 @@ def main():
     # choix des paramètres de mesure du bunching
     method='diff_beta_centre_abs'
     itv_bunching = 5
+
+    
     
         
     # calcul du bunching du département
     if False:
-        #calcul_bunching(dep.code, method='AMP', itv_bunching=5, path=output_folder)
-        bunching_dep = calcul_bunching(dep.code, method=method, itv_bunching=itv_bunching, plot_ecart = True, path=output_folder, old_built_filter=old_built_filter, verbose=True)
-        bunching_dep_sum = bunching_dep.sum(axis=1) # on somme le bunching de l'ensemble des 6 seuils        
+        bunching_dep = calcul_bunching(dep.code, method=method, itv_bunching=itv_bunching, window_size=window_size, plot_ecart = True, path=output_folder, old_built_filter=old_built_filter, verbose=True)
         
-    
+        # Affichage somme bunching sur l'ensemble des seuils
+        bunching_dep_sum = bunching_dep.sum(axis=1) # on somme le bunching de l'ensemble des 6 seuils 
         print('bunching_dep_sum =', bunching_dep_sum.iloc[0])
-            
         
-    # carte du bunching     
+        # Affichage bunching des seuils D/E à F/G
+        seuils = ['D/E', 'E/F', 'F/G']
+        
+        # formatage d'une chaîne de caractère simplifiée pour identifier les seuils
+        seuils_sans_slash = '_'.join(seuils)
+        seuils_sans_slash = seuils_sans_slash.replace("/","")
+        
+        # implémentation d'une liste du nom exact des colonnes de france_bunching à sélectionner
+        noms_colonnes_seuils = []
+        for seuil in seuils:
+            colonne_seuil = [colonne for colonne in bunching_dep.columns if colonne.startswith(f'{seuil}')]
+            nom_colonne = colonne_seuil[0]
+            noms_colonnes_seuils.append(nom_colonne)
+
+        bunching_dep_cut = bunching_dep.filter(items = noms_colonnes_seuils) 
+        bunching_dep_sum = bunching_dep_cut.sum(axis=1)
+
+        print(f'bunching_dep_sum_{seuils_sans_slash} =', bunching_dep_sum.iloc[0])
+        
+        
+        
+        
+    # carte du bunching      
     if True:
         today = pd.Timestamp(date.today()).strftime('%Y%m%d')
         output_folder = os.path.join('output',today)
         os.makedirs(output_folder, exist_ok=True)
         
-        france_bunching = calcul_bunching_france(output_folder, method=method, itv_bunching=itv_bunching, old_built_filter=old_built_filter, max_xlim=600)
+        france_bunching = calcul_bunching_france(output_folder, method=method, itv_bunching=itv_bunching, window_size=window_size, old_built_filter=old_built_filter, max_xlim=600)
         
         
         # un dictionnaire par cartes, mais autant de méthodes qu'on veut a partir 
@@ -728,14 +943,15 @@ def main():
             dict_dep_bunching = {Departement(dep_code):bunching_somme for dep_code, bunching_somme in zip(france_bunching.index, france_bunching[f'Somme_method_{method}'])}
             
             if old_built_filter:
-                save=f"Carte somme du bunching sur l'ensemble des seuils (Méthode {method}, intervalle bunching = {itv_bunching} kWh.m-2, filtré sur les DPE avant 1974)"
-                map_title=f"Somme du bunching sur l'ensemble des seuils\n(Méthode {method}, intervalle bunching = {itv_bunching}"" kWh.m$^{-2}$, filtré sur les DPE avant 1974)"
+                save=f"Carte somme du bunching sur l'ensemble des seuils (Méthode {method}, intervalle bunching = {itv_bunching} kWh.m-2, anciens logements)"
+                map_title=f"Somme du bunching sur l'ensemble des seuils\n(Méthode {method}, intervalle bunching = {itv_bunching}"" kWh.m$^{-2}$, anciens logements)"
             else :
                 save=f"Carte somme du bunching sur l'ensemble des seuils (Méthode {method}, intervalle bunching = {itv_bunching} kWh.m-2)"
                 map_title=f"Somme du bunching sur l'ensemble des seuils\n(Méthode {method}, intervalle bunching = {itv_bunching}"" kWh.m$^{-2}$)"
         
             draw_departement_map(dict_dep_bunching,output_folder,save=save, map_title=map_title)
         
+            
         
         # Moyenne des methodes
         if False: 
@@ -743,8 +959,8 @@ def main():
             dict_dep_bunching = {Departement(dep_code):bunching_mean for dep_code, bunching_mean in zip(france_bunching.index, france_bunching[f'Moyenne_method_{method}'])}
             
             if old_built_filter:
-                save=f"Carte moyenne du bunching sur l'ensemble des seuils (Méthode {method}, intervalle bunching = {itv_bunching} kWh.m-2, filtré sur les DPE avant 1974)"
-                map_title=f"Moyenne du bunching sur l'ensemble des seuils\n(Méthode {method}, intervalle bunching = {itv_bunching}"" kWh.m$^{-2}$, filtré sur les DPE avant 1974)"
+                save=f"Carte moyenne du bunching sur l'ensemble des seuils (Méthode {method}, intervalle bunching = {itv_bunching} kWh.m-2, anciens logements)"
+                map_title=f"Moyenne du bunching sur l'ensemble des seuils\n(Méthode {method}, intervalle bunching = {itv_bunching}"" kWh.m$^{-2}$, anciens logements)"
             else :
                 save=f"Carte moyenne du bunching sur l'ensemble des seuils (Méthode {method}, intervalle bunching = {itv_bunching} kWh.m-2)"
                 map_title=f"Moyenne du bunching sur l'ensemble des seuils\n(Méthode {method}, intervalle bunching = {itv_bunching}"" kWh.m$^{-2}$)"
@@ -762,8 +978,8 @@ def main():
             dict_dep_bunching = {Departement(dep_code):bunching_EF for dep_code, bunching_EF in zip(france_bunching.index, france_bunching[nom_colonne])}
    
             if old_built_filter:
-                save=f"Carte du bunching au seuil {seuil_sans_slash} (Méthode {method}, intervalle bunching = {itv_bunching} kWh.m-2, filtré sur les DPE avant 1974)"
-                map_title=f"Bunching au seuil {seuil}\n(Méthode {method}, intervalle bunching = {itv_bunching}"" kWh.m$^{-2}$, filtré sur les DPE avant 1974)"
+                save=f"Carte du bunching au seuil {seuil_sans_slash} (Méthode {method}, intervalle bunching = {itv_bunching} kWh.m-2, anciens logements)"
+                map_title=f"Bunching au seuil {seuil}\n(Méthode {method}, intervalle bunching = {itv_bunching}"" kWh.m$^{-2}$, anciens logements)"
             else :
                 save=f"Carte du bunching au seuil {seuil_sans_slash} (Méthode {method}, intervalle bunching = {itv_bunching} kWh.m-2)"
                 map_title=f"Bunching au seuil {seuil}\n(Méthode {method}, intervalle bunching = {itv_bunching}"" kWh.m$^{-2}$)"
@@ -788,22 +1004,48 @@ def main():
                 noms_colonnes_seuils.append(nom_colonne)
 
             france_bunching_cut = france_bunching.filter(items = noms_colonnes_seuils)  
-            print(france_bunching_cut)
             
             france_bunching[f'Somme_seuils_{seuils_sans_slash}_method_{method}'] = france_bunching_cut.sum(axis=1) # on somme sur les lignes des colonnes conservées
             dict_dep_bunching = {Departement(dep_code):bunching_somme for dep_code, bunching_somme in zip(france_bunching.index, france_bunching[f'Somme_seuils_{seuils_sans_slash}_method_{method}'])}
             
+            print('france_bunching :\n', france_bunching)
+
     
             if old_built_filter:
-                save=f"Carte somme du bunching aux seuils {seuils_sans_slash} (Méthode {method}, intervalle bunching = {itv_bunching} kWh.m-2, filtré sur les DPE avant 1974)"
-                map_title=f"Somme du bunching aux seuils {seuils}\n(Méthode {method}, intervalle bunching = {itv_bunching}"" kWh.m$^{-2}$, filtré sur les DPE avant 1974)"
+                save=f"Carte somme du bunching aux seuils {seuils_sans_slash} (Méthode {method}, intervalle bunching = {itv_bunching} kWh.m-2, anciens logements)"
+                map_title=f"Somme du bunching aux seuils {seuils}\n(Méthode {method}, intervalle bunching = {itv_bunching}"" kWh.m$^{-2}$, anciens logements)"
             else :
                 save=f"Carte somme du bunching aux seuils {seuils_sans_slash} (Méthode {method}, intervalle bunching = {itv_bunching} kWh.m-2)"
                 map_title=f"Somme du bunching aux seuils {seuils}\n(Méthode {method}, intervalle bunching = {itv_bunching}"" kWh.m$^{-2}$)"
         
             draw_departement_map(dict_dep_bunching,output_folder,save=save, map_title=map_title)
-          
-  
+            
+            
+            if True: # todo : creer une fonction qui fait ça
+                # Regplot entre bunching et nb_dpe_filtre
+                
+                df_bunching = pd.DataFrame().from_dict(dict_dep_bunching, orient='index', columns=[f'Somme_seuils_{seuils_sans_slash}_method_{method}'])
+                
+                dict_dep_nb_dpe_filtre=calcul_nb_dpe(old_built_filter)
+                df_nb_dpe_filtre = pd.DataFrame().from_dict(dict_dep_nb_dpe_filtre, orient='index', columns=['nb_dpe_filtre'])
+    
+                # Création d'une colonne dep_code commune aux deux df afin de pouvoir merge
+                df_bunching['dep_code'] = [dep.code for dep in df_bunching.index]  # Extrait le code du département
+                #df_bunching = df_bunching.reset_index(drop=True)  # Réinitialise l'index
+                
+                df_nb_dpe_filtre['dep_code'] = [dep.code for dep in df_nb_dpe_filtre.index]  # Extrait le code du département
+    
+    
+                df_bunching = df_bunching.merge(df_nb_dpe_filtre, on='dep_code')
+                df_bunching = df_bunching.set_index("dep_code")  # Réinitialise l'index
+    
+    
+                #sns.set()                       
+                p = sns.regplot(data=df_bunching, x="nb_dpe_filtre", y=f'Somme_seuils_{seuils_sans_slash}_method_{method}')
+                p.set_ylabel(f'Somme_seuils_{seuils_sans_slash}_method_{method}', fontsize=10)
+                p.set_title(f"Corrélation entre le nombre de DPE et\nle bunching aux seuils {seuils_sans_slash}, méthode {method}")
+                p.set_ylim(0.01, 0.04)
+
 
         #france_bunching = france_bunching_method1.join(france_bunching_method2)
         # pour pouvoir faire des stats sur l'ensemble des methodes
@@ -817,22 +1059,88 @@ def main():
         today = pd.Timestamp(date.today()).strftime('%Y%m%d')
         output_folder = os.path.join('output',today)
         os.makedirs(output_folder, exist_ok=True)
+   
+        draw_departement_map(calcul_nb_dpe(old_built_filter),output_folder,save="Carte du nombre de DPE sur lesquels on fit une distribution beta (curve_fit)", map_title="Carte du nombre de DPE sur lesquels on fit une distribution beta (curve_fit)") # todo: modifier nom/titre ?
+                
+        tac = time.time()
+        print(f'Done in {tac-tic:.2f}s.')
         
-        france = France()
-        dict_dep_nb_dpe_filtre = {d:0. for d in france.departements} 
         
-        for dep in france.departements :
-            dep_code = dep.code
-            print(dep)
-            _, _, _, nb_dpe_filtre = fit_dpe_data(dep_code, method='curve_fit', old_built_filter=old_built_filter)
-            dict_dep_nb_dpe_filtre[dep] = nb_dpe_filtre 
-       
-        draw_departement_map(dict_dep_nb_dpe_filtre,output_folder,save="Carte du nombre de DPE sur lesquels on fit une distribution beta (curve_fit)", map_title="Carte du nombre de DPE sur lesquels on fit une distribution beta (curve_fit)") # todo: modifier nom/titre ?
+        
+        
+    # SEABORN COMPARAISON METHODES
 
-       
+    if False : 
+        seuils = ['D/E', 'E/F', 'F/G']
+    
+        # formatage d'une chaîne de caractère simplifiée pour identifier les seuils
+        seuils_sans_slash = '_'.join(seuils)
+        seuils_sans_slash = seuils_sans_slash.replace("/","")
         
-    tac = time.time()
-    print(f'Done in {tac-tic:.2f}s.')
+        df_compare = df_compare_methods(seuils, output_folder, old_built_filter=old_built_filter)        
+        
+        p = sns.pairplot(data= df_compare, x_vars=['Méthode AMP', 'Méthode diff_beta_centre_abs', 'Méthode diff_moyenne'],  y_vars=['Méthode AMP', 'Méthode diff_beta_centre_abs', 'Méthode diff_moyenne'], hue='nb_dpe_filtre') #hue='département')
+        p.fig.suptitle(f"Corrélation entre les différentes méthodes de mesure du bunching\naux seuils {seuils_sans_slash}, old_built_filter = {old_built_filter}")
+        p.fig.subplots_adjust(top=0.92)
+
+
+        if old_built_filter:
+            save_path = os.path.join(output_folder,f'Pairplot_correlation_methodes_bunching_seuils_{seuils_sans_slash}_old_built.png') 
+        else: 
+            save_path = os.path.join(output_folder,f'Pairplot_correlation_methodes_bunching_seuils_{seuils_sans_slash}.png') 
+        plt.savefig(save_path, bbox_inches='tight')
+    
+        # plt.show()
+        # plt.close()
+        
+        
+        
+        
+    # TEST CLASSE GES VS CLASSE ENERGIE
+    
+    if False:
+        
+        # france = France()
+        # dict_dep_nb_dpe_filtre = {d:0. for d in france.departements} 
+        
+            # nb_bilan_dpe_vs_calcul = 0
+            # nb_bilan_dpe_vs_ges = 0
+        
+        # for dep in france.departements :
+            # dep_code = dep.code
+            dep_code = '75'
+            dpe_data, _ , _ = get_bdnb(dep_code)
+            dpe_data = dpe_data[dpe_data.type_dpe=='dpe arrêté 2021 3cl logement'][['conso_5_usages_ep_m2','periode_construction_dpe','surface_habitable_logement','date_etablissement_dpe', 'classe_bilan_dpe', 'classe_emission_ges']].compute() 
+            dpe_data = dpe_data.dropna()
+            #dpe_data = dpe_data.map(round)
+            
+            print('nb_tot_dpe : ', len(dpe_data))
+            
+            # Création des bins et des labels pour pandas.cut
+            bins = [0, 70, 110, 180, 250, 330, 420, np.inf]
+            labels = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
+            
+            dpe_data['classe_energie_calcul'] = pd.cut(dpe_data['conso_5_usages_ep_m2'], bins=bins,labels=labels, include_lowest=True)
+            
+            # nb de logements dont le DPE ne correspond ni à l'étiquette énergie, ni à l'étiquette ges
+            dpe_data_cut_1 = dpe_data[(dpe_data['classe_energie_calcul'] != dpe_data['classe_bilan_dpe']) & (dpe_data['classe_emission_ges'] != dpe_data['classe_bilan_dpe'])]
+            
+            nb_dpe_bizarres = len(dpe_data_cut_1)
+            print("Nombre de DPE qui ne correspondent ni à l'étiquette énergie, ni à l'étiquette GES :", nb_dpe_bizarres)
+            
+            
+            # nb de logements dont la classe GES > classe énergie --> c'est la classe GES qui limite le DPE global
+            dpe_data_cut_2 = dpe_data[dpe_data['classe_emission_ges'] > dpe_data['classe_energie_calcul']]
+            
+            nb_dpe_lim_ges = len(dpe_data_cut_2)
+            print("Nombre de DPE limités par l'étiquette GES : ", nb_dpe_lim_ges)
+            
+            # vérification : nb_bugs doit être nul
+            dpe_data_cut_2_bugs = dpe_data_cut_2[dpe_data_cut_2['classe_emission_ges'] != dpe_data_cut_2['classe_bilan_dpe']]
+            print('nb_bugs : ', len(dpe_data_cut_2_bugs))
+            
+            # todo idée : tracer des pie-charts de répartition des logements par départements 
+            
     
 if __name__ == '__main__':
     main()
