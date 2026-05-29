@@ -765,7 +765,7 @@ def calcul_nb_dpe(old_built_filter):
 #%%
 
 
-def df_compare_methods(seuils, path, old_built_filter): # todo : rajouter diff_beta_gauche ! et changer nb_dpe_filtre
+def df_compare_methods(seuils, path, old_built_filter, itv_bunching=5): # todo : changer nb_dpe_filtre
     """
     Création d'un DataFrame du bunching selon différentes méthodes.
 
@@ -799,8 +799,7 @@ def df_compare_methods(seuils, path, old_built_filter): # todo : rajouter diff_b
     df_compare['nb_dpe_filtre'] = dict_dep_nb_dpe_filtre.values()
     
     # Ajout d'une colonne méthode AMP
-    
-    france_bunching = calcul_bunching_france(path, method='AMP', itv_bunching=5, window_size = 50, old_built_filter=old_built_filter, max_xlim=600)
+    france_bunching = calcul_bunching_france(path, method='AMP', itv_bunching=itv_bunching, window_size = 50, old_built_filter=old_built_filter, max_xlim=600)
     
     # implémentation d'une liste du nom exact des colonnes de france_bunching à sélectionner
     noms_colonnes_seuils = []
@@ -813,12 +812,9 @@ def df_compare_methods(seuils, path, old_built_filter): # todo : rajouter diff_b
     
     df_compare['Méthode AMP'] = france_bunching_cut.sum(axis=1) # on somme sur les lignes des colonnes conservées
 
-
-
     # Ajout d'une colonne méthode diff_beta_centre_abs
+    france_bunching = calcul_bunching_france(path, method='diff_beta_centre_abs', itv_bunching=itv_bunching, window_size = 50, old_built_filter=old_built_filter, max_xlim=600)
     
-    france_bunching = calcul_bunching_france(path, method='diff_beta_centre_abs', itv_bunching=5, window_size = 50, old_built_filter=old_built_filter, max_xlim=600)
-
     # implémentation d'une liste du nom exact des colonnes de france_bunching à sélectionner
     noms_colonnes_seuils = []
     for seuil in seuils:
@@ -831,10 +827,8 @@ def df_compare_methods(seuils, path, old_built_filter): # todo : rajouter diff_b
     df_compare['Méthode diff_beta_centre_abs'] = france_bunching_cut.sum(axis=1) # on somme sur les lignes des colonnes conservées
 
 
-
     # Ajout d'une colonne méthode diff_moyenne
-    
-    france_bunching = calcul_bunching_france(path, method='diff_moyenne', itv_bunching=5, window_size = 50, old_built_filter=old_built_filter, max_xlim=600)
+    france_bunching = calcul_bunching_france(path, method='diff_moyenne', itv_bunching=itv_bunching, window_size = 50, old_built_filter=old_built_filter, max_xlim=600)
    
     # implémentation d'une liste du nom exact des colonnes de france_bunching à sélectionner
     noms_colonnes_seuils = []
@@ -846,6 +840,21 @@ def df_compare_methods(seuils, path, old_built_filter): # todo : rajouter diff_b
     france_bunching_cut = france_bunching.filter(items = noms_colonnes_seuils)  
         
     df_compare['Méthode diff_moyenne'] = france_bunching_cut.sum(axis=1) # on somme sur les lignes des colonnes conservées
+   
+    
+    # Ajout d'une colonne méthode diff_beta_gauche
+    france_bunching = calcul_bunching_france(path, method='diff_beta_gauche', itv_bunching=itv_bunching, window_size = 50, old_built_filter=old_built_filter, max_xlim=600)
+   
+    # implémentation d'une liste du nom exact des colonnes de france_bunching à sélectionner
+    noms_colonnes_seuils = []
+    for seuil in seuils:
+        colonne_seuil = [colonne for colonne in france_bunching.columns if colonne.startswith(f'{seuil}')]
+        nom_colonne = colonne_seuil[0]
+        noms_colonnes_seuils.append(nom_colonne)
+        
+    france_bunching_cut = france_bunching.filter(items = noms_colonnes_seuils)  
+        
+    df_compare['Méthode diff_beta_gauche'] = france_bunching_cut.sum(axis=1) # on somme sur les lignes des colonnes conservées
    
     
 # todo : ajouter un save du df_compare ?
@@ -872,7 +881,7 @@ def main():
     output_folder = os.path.join('output',today)
     os.makedirs(output_folder, exist_ok=True)
     
-    dep = Departement('48')
+    dep = Departement('84')
     old_built_filter = True
     window_size = 50  # fenêtre de la moyenne glissante (rolling de la méthode 'diff_moyenne')
     
@@ -880,7 +889,7 @@ def main():
     # DISTRIBUTION DES DPE
     
     # tracé de la distribution des dpe du département
-    if False:
+    if True:
         #dpe_data = get_dpe_consumption(dep.code) # cette ligne ne sert a rien car déjà dans plot_dpe_distribution ?
         plot_dpe_distribution(output_folder,dep.code, save=True, plot_mean=True, plot_median=False, window_size = window_size, plot_fit=False, plot_curve_fit=True, old_built_filter=old_built_filter, max_xlim=600)
     
@@ -889,14 +898,17 @@ def main():
     # BUNCHING
         
     # choix des paramètres de mesure du bunching
-    method='diff_beta_centre_abs'
-    itv_bunching = 5
+    # method='diff_beta_centre_abs'
+    method = 'diff_moyenne'
+    # method = 'AMP'
+    # itv_bunching = 5
+    itv_bunching = 10
 
     
     
         
     # calcul du bunching du département
-    if False:
+    if True:
         bunching_dep = calcul_bunching(dep.code, method=method, itv_bunching=itv_bunching, window_size=window_size, plot_ecart = True, path=output_folder, old_built_filter=old_built_filter, verbose=True)
         
         # Affichage somme bunching sur l'ensemble des seuils
@@ -1019,7 +1031,8 @@ def main():
                 map_title=f"Somme du bunching aux seuils {seuils}\n(Méthode {method}, intervalle bunching = {itv_bunching}"" kWh.m$^{-2}$)"
         
             draw_departement_map(dict_dep_bunching,output_folder,save=save, map_title=map_title)
-            
+            plt.show()
+            plt.close()
             
             if True: # todo : creer une fonction qui fait ça
                 # Regplot entre bunching et nb_dpe_filtre
@@ -1040,11 +1053,21 @@ def main():
                 df_bunching = df_bunching.set_index("dep_code")  # Réinitialise l'index
     
     
-                #sns.set()                       
-                p = sns.regplot(data=df_bunching, x="nb_dpe_filtre", y=f'Somme_seuils_{seuils_sans_slash}_method_{method}')
-                p.set_ylabel(f'Somme_seuils_{seuils_sans_slash}_method_{method}', fontsize=10)
-                p.set_title(f"Corrélation entre le nombre de DPE et\nle bunching aux seuils {seuils_sans_slash}, méthode {method}")
-                p.set_ylim(0.01, 0.04)
+                #sns.set()  
+                fig,ax = plt.subplots(figsize=(5,5),dpi=300)                  
+                sns.regplot(data=df_bunching, x="nb_dpe_filtre", y=f'Somme_seuils_{seuils_sans_slash}_method_{method}',ax=ax)
+                ax.set_ylabel(f'Somme_seuils_{seuils_sans_slash}_method_{method}', fontsize=10)
+                ax.set_title(f"Corrélation entre le nombre de DPE et\nle bunching aux seuils {seuils_sans_slash}, méthode {method}")
+                # p.set_ylim(0.01, 0.04)
+                
+                df_bunching['inv_nb_dpe_filtre'] = 1/df_bunching.nb_dpe_filtre
+                
+                # 1/nb_dpe_filtre
+                fig,ax = plt.subplots(figsize=(5,5),dpi=300)                  
+                sns.regplot(data=df_bunching, x="inv_nb_dpe_filtre", y=f'Somme_seuils_{seuils_sans_slash}_method_{method}',ax=ax)
+                ax.set_ylabel(f'Somme_seuils_{seuils_sans_slash}_method_{method}', fontsize=10)
+                ax.set_title(f"Corrélation entre le nombre de DPE et\nle bunching aux seuils {seuils_sans_slash}, méthode {method}")
+                ax.set_xlim([0., 1e-4])
 
 
         #france_bunching = france_bunching_method1.join(france_bunching_method2)
@@ -1070,16 +1093,17 @@ def main():
         
     # SEABORN COMPARAISON METHODES
 
-    if False : 
+    if True : 
         seuils = ['D/E', 'E/F', 'F/G']
+        itv_bunching = 10
     
         # formatage d'une chaîne de caractère simplifiée pour identifier les seuils
         seuils_sans_slash = '_'.join(seuils)
         seuils_sans_slash = seuils_sans_slash.replace("/","")
         
-        df_compare = df_compare_methods(seuils, output_folder, old_built_filter=old_built_filter)        
+        df_compare = df_compare_methods(seuils, output_folder, old_built_filter=old_built_filter, itv_bunching=itv_bunching)        
         
-        p = sns.pairplot(data= df_compare, x_vars=['Méthode AMP', 'Méthode diff_beta_centre_abs', 'Méthode diff_moyenne'],  y_vars=['Méthode AMP', 'Méthode diff_beta_centre_abs', 'Méthode diff_moyenne'], hue='nb_dpe_filtre') #hue='département')
+        p = sns.pairplot(data= df_compare[[e for e in df_compare.columns if e.startswith('Méthode')]])#, hue='nb_dpe_filtre') #hue='département')
         p.fig.suptitle(f"Corrélation entre les différentes méthodes de mesure du bunching\naux seuils {seuils_sans_slash}, old_built_filter = {old_built_filter}")
         p.fig.subplots_adjust(top=0.92)
 
