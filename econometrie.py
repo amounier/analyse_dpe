@@ -103,7 +103,17 @@ def tension_immob_dep():
     
     
 
-
+def get_nb_diagnostiqueur_dep():
+    data = pd.read_csv(os.path.join('data','MTE','annuaire-diagnostiqueurs-immobiliers.csv'),sep=';')
+    data = data[data['Type de certificat'].str.contains('DPE')]
+    data['CP'] = [f"{e:05d}" for e in data.CP]
+    data = data[~data.CP.str.startswith('97')] # uniquement territoire hexagonal
+    data = data[~data.CP.str.startswith('20')] # hors corse (2A et 2B aggrégé)
+    data['dep_code'] = [Departement(e[:2]).code for e in data.CP]
+    
+    data_count = data.groupby('dep_code')[['Organisme']].count()
+    return data_count
+    
 
 
     
@@ -125,7 +135,7 @@ def main():
        
         pd.options.display.max_columns = None
         df_tension_immob_dep = tension_immob_dep()
-        print(df_tension_immob_dep)
+        # print(df_tension_immob_dep)
         
 # =============================================================================
 #         # to do : Visualisation des parts par département
@@ -176,10 +186,11 @@ def main():
         variables = sm.add_constant(variables)
         
         # variables_list = ['part_A','part_Abis','part_B1','part_B2','part_C']
-        variables_list = ['part_A','part_C','zcl_Tref','log_total_logements']
+        variables_list = ['part_A','part_C','zcl_Tref','log_total_logements','Organisme']
         # variables_list = ['zcl_H3','log_total_logements']
         
         bunching = bunching.join(variables)
+        bunching = bunching.join(get_nb_diagnostiqueur_dep())
         
         # ajout de la zone climatique 
         bunching["zcl"] = [Departement(e).climat for e in bunching.index]
@@ -188,6 +199,8 @@ def main():
         
         # ajout de l'inverse du nombre de logements
         bunching['log_total_logements'] = np.log(bunching.total_logements)
+        
+        bunching = bunching[[f'Somme_seuils_{seuils_sans_slash}_method_{method}','const']+variables_list].dropna()
 
         
         model = sm.OLS(bunching[f'Somme_seuils_{seuils_sans_slash}_method_{method}'], bunching[['const']+variables_list])
