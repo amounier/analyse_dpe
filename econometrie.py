@@ -176,13 +176,14 @@ def main():
         variables = sm.add_constant(variables)
         
         # variables_list = ['part_A','part_Abis','part_B1','part_B2','part_C']
-        variables_list = ['part_A','part_C','zcl_H3','log_total_logements']
+        variables_list = ['part_A','part_C','zcl_Tref','log_total_logements']
         # variables_list = ['zcl_H3','log_total_logements']
         
         bunching = bunching.join(variables)
         
         # ajout de la zone climatique 
         bunching["zcl"] = [Departement(e).climat for e in bunching.index]
+        bunching["zcl_Tref"] = [Departement(e).climat_Tref for e in bunching.index]
         bunching['zcl_H3'] = (bunching.zcl == 'H3').map(int)
         
         # ajout de l'inverse du nombre de logements

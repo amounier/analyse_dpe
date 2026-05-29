@@ -77,6 +77,15 @@ class Departement:
                         'H2d': 824,
                         'H3': 830}
         self.climat_int = zcl_int_dict.get(self.climat)
+        zcl_Tref_dict = {'H1a': 0.21,
+                         'H1b': -0.13,
+                         'H1c': -0.08,
+                         'H2a': 1.27,
+                         'H2b': 0.83,
+                         'H2c': 1.06,
+                         'H2d': 0.09,
+                         'H3': 1.41}
+        self.climat_Tref = zcl_Tref_dict.get(self.climat) + 7.1
         self.prefecture = dict_name_dep_name_prf.get(self.name)
         
     def __str__(self):
