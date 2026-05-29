@@ -70,17 +70,6 @@ def tension_immob_dep():
     df_communes = df_communes[~df_communes['DEP'].isin(['971', '972', '973', '974', '975', '976'])] # on étudie seulement la France hexagonale
 
 
-# =============================================================================
-#     OLD : BDD Logements avec Nan dans le Cantal 15
-
-#     # Import du nombre de logements par communes
-#     df_logements = pd.read_excel(path_logements, usecols='A:E', dtype={'CODGEO':int,'P22_LOG':float} ,skiprows=5) # usecols=['CODGEO', 'DEP', 'LIBGEO', 'P22_LOG'], skiprows=4)
-#     df_logements.set_index('CODGEO')
-#     df_logements = df_logements[~df_logements['DEP'].isin(['971', '972', '973', '974', '975', '976'])]
-#     df_logements = df_logements['P22_LOG'].map(round) # on arrondi le nombre de logements par départements (pourquoi est-ce des nb décimaux ??)
-#     
-# =============================================================================
-    
     # Création du df des tensions immobilières par département
     df_tension_immob_dep = pd.DataFrame(index=list_dep_code) 
     df_tension_immob_dep['departement'] = [Departement(f'{n}') for n in df_tension_immob_dep.index]
