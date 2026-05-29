@@ -101,6 +101,7 @@ def get_nb_diagnostiqueur_dep():
     data['dep_code'] = [Departement(e[:2]).code for e in data.CP]
     
     data_count = data.groupby('dep_code')[['Organisme']].count()
+    data_count = data_count.rename(columns={'Organisme':'nb_diagnostiqueurs_dep'})
     return data_count
     
 
@@ -148,7 +149,7 @@ def main():
         window_size=50
             
         
-        france_bunching = calcul_bunching_france(output_folder, method, itv_bunching, window_size, old_built_filter, max_xlim = 600, verbose=False)
+        france_bunching = calcul_bunching_france(output_folder, method, itv_bunching, window_size, old_built_filter, max_xlim = 600, verbose=False, force=True)
         
         
         seuils = ['D/E', 'E/F', 'F/G']
@@ -175,8 +176,8 @@ def main():
         variables = sm.add_constant(variables)
         
         # variables_list = ['part_A','part_Abis','part_B1','part_B2','part_C']
-        variables_list = ['part_A','part_C','zcl_Tref','log_total_logements','Organisme']
-        # variables_list = ['zcl_H3','log_total_logements']
+        # variables_list = ['part_A','part_C','zcl_Tref','log_total_logements','nb_diagnostiqueurs_dep']
+        variables_list = ['part_C','part_A','log_total_logements']
         
         bunching = bunching.join(variables)
         bunching = bunching.join(get_nb_diagnostiqueur_dep())
