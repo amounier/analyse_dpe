@@ -410,6 +410,7 @@ def calcul_bunching(dep_code, method, itv_bunching, window_size, plot_ecart, pat
                 print(f'nb_droite_{k}', nb_droite)
 
             AMP = (nb_gauche - nb_droite) / (nb_gauche+nb_droite)  # average manipulation density autour du seuil # on pourrait aussi diviser par nb tot DPE (AJa et al) ? 
+            # AMP = (nb_gauche - nb_droite) / nb_dpe  # average manipulation density autour du seuil # on pourrait aussi diviser par nb tot DPE (AJa et al) ? 
          
             # Ajout d'une colonne correspondante au seuil dans le bunching DataFrame 
             bunching_df[f'{k}_method_{method}'] = AMP
@@ -543,6 +544,7 @@ def calcul_bunching(dep_code, method, itv_bunching, window_size, plot_ecart, pat
 # =============================================================================
         
         dpe_data_df = formatage_dpe_data(dep_code=dep_code, window_size=window_size, old_built_filter=old_built_filter)  # moyenne glissante sur une fenêtre de taille window_size
+        
         dpe_data_df['y_diff_moyenne_norm'] = (dpe_data_df.nb_observations - dpe_data_df.nb_obs_moyenne)/nb_dpe
         dpe_data_df['y_diff_moyenne_norm_abs'] = dpe_data_df['y_diff_moyenne_norm'].abs() 
 
@@ -553,8 +555,14 @@ def calcul_bunching(dep_code, method, itv_bunching, window_size, plot_ecart, pat
             # Création d'un DataFrame filtré sur l'intervalle à +-{itv_bunching} du seuil
             dpe_data_df_filtered = dpe_data_df[(dpe_data_df.conso_5_usages_ep_m2_arrondie > seuil-itv_bunching) & (dpe_data_df.conso_5_usages_ep_m2_arrondie <= seuil + itv_bunching)]
             
+            # TODO : à généraliser ?
+            seuil_gauche = etiquette_ep_dict.get(k.split('/')[0])[0]
+            seuil_droite = etiquette_ep_dict.get(k.split('/')[1])[1]
+            # nb_dpe_seuil = dpe_data_df[(dpe_data_df.conso_5_usages_ep_m2_arrondie > seuil_gauche) & (dpe_data_df.conso_5_usages_ep_m2_arrondie <= seuil_droite)].nb_observations.sum()
+            nb_dpe_seuil = dpe_data_df[(dpe_data_df.conso_5_usages_ep_m2_arrondie > seuil-itv_bunching) & (dpe_data_df.conso_5_usages_ep_m2_arrondie <= seuil + itv_bunching)].nb_observations.sum()
+            
             # Ajout d'une colonne correspondante au seuil dans le bunching DataFrame 
-            bunching_df[f'{k}_method_{method}'] = dpe_data_df_filtered['y_diff_moyenne_norm_abs'].sum()
+            bunching_df[f'{k}_method_{method}'] = dpe_data_df_filtered['y_diff_moyenne_norm_abs'].sum() #*nb_dpe/nb_dpe_seuil
                 
         print(f'Bunching (méthode {method}, window_size {window_size} kWh) pour {departement}, avec un intervalle de +-{itv_bunching} kWh/m2 autour des seuils, old_built_filter = {old_built_filter} : \n', bunching_df)
 
@@ -636,7 +644,7 @@ def calcul_bunching(dep_code, method, itv_bunching, window_size, plot_ecart, pat
 #%%
 
 
-def calcul_bunching_france(path, method, itv_bunching, window_size, old_built_filter, max_xlim = 600, verbose=False):
+def calcul_bunching_france(path, method, itv_bunching, window_size, old_built_filter, max_xlim = 600, verbose=False, force=False):
     """
     Calcul le bunching sur l'ensemble des départements de l'hexagone avec plusieurs méthodes possibles.
 
@@ -680,7 +688,7 @@ def calcul_bunching_france(path, method, itv_bunching, window_size, old_built_fi
     if old_built_filter:
         save_name = save_name.replace('.csv','_old_built.csv')
     
-    if save_name not in existing_files:
+    if save_name not in existing_files or force:
         france = France()
         
         # Initialisation du dictionnaire de bunching avec des listes vides
@@ -758,6 +766,33 @@ def calcul_nb_dpe(old_built_filter):
         dict_dep_nb_dpe_filtre[dep] = nb_dpe_filtre 
     
     return dict_dep_nb_dpe_filtre 
+
+
+def get_nb_dpe(old_built_filter=True,seuils=['D/E', 'E/F', 'F/G']):
+    france = France()
+    dict_dep_nb_dpe_filtre = {d:0. for d in france.departements} 
+    
+    for dep in france.departements:
+        dep_code = dep.code
+        
+        dpe_data = get_dpe_consumption(dep_code, old_built_filter=old_built_filter) # prend du temps
+        dpe_data = dpe_data.dropna()
+        dpe_data = dpe_data.map(round)
+        counter_dict = dict(dpe_data.conso_5_usages_ep_m2.value_counts())
+        
+        min_seuil = np.inf
+        for s in seuils :
+            min_seuil = min(min_seuil,etiquette_ep_dict.get(s.split('/')[0])[0])
+            
+        nb_dpe = sum([nb for s,nb in counter_dict.items() if s>=min_seuil])
+        dict_dep_nb_dpe_filtre[dep] = nb_dpe 
+        
+    return dict_dep_nb_dpe_filtre 
+        
+    
+        
+        
+
     
 
 #%%
@@ -879,8 +914,8 @@ def main():
     output_folder = os.path.join('output',today)
     os.makedirs(output_folder, exist_ok=True)
     
-    dep = Departement('84')
-    old_built_filter = False
+    dep = Departement('32')
+    old_built_filter = True
     window_size = 50  # fenêtre de la moyenne glissante (rolling de la méthode 'diff_moyenne')
     
     
@@ -889,7 +924,7 @@ def main():
     # tracé de la distribution des dpe du département
     if False:
         #dpe_data = get_dpe_consumption(dep.code) # cette ligne ne sert a rien car déjà dans plot_dpe_distribution ?
-        plot_dpe_distribution(output_folder,dep.code, save=True, plot_mean=True, plot_median=False, window_size = window_size, plot_fit=False, plot_curve_fit=True, old_built_filter=old_built_filter, max_xlim=600)
+        plot_dpe_distribution(output_folder,dep.code, save=True, plot_mean=True, plot_median=False, window_size = window_size, plot_fit=False, plot_curve_fit=False, old_built_filter=old_built_filter, max_xlim=600)
     
     
         
@@ -936,12 +971,12 @@ def main():
         
         
     # carte du bunching      
-    if False:
+    if True:
         today = pd.Timestamp(date.today()).strftime('%Y%m%d')
         output_folder = os.path.join('output',today)
         os.makedirs(output_folder, exist_ok=True)
         
-        france_bunching = calcul_bunching_france(output_folder, method=method, itv_bunching=itv_bunching, window_size=window_size, old_built_filter=old_built_filter, max_xlim=600)
+        france_bunching = calcul_bunching_france(output_folder, method=method, itv_bunching=itv_bunching, window_size=window_size, old_built_filter=old_built_filter, max_xlim=600,force=True)
         
         
         # un dictionnaire par cartes, mais autant de méthodes qu'on veut a partir 
@@ -1037,35 +1072,53 @@ def main():
                 
                 df_bunching = pd.DataFrame().from_dict(dict_dep_bunching, orient='index', columns=[f'Somme_seuils_{seuils_sans_slash}_method_{method}'])
                 
-                dict_dep_nb_dpe_filtre=calcul_nb_dpe(old_built_filter)
-                df_nb_dpe_filtre = pd.DataFrame().from_dict(dict_dep_nb_dpe_filtre, orient='index', columns=['nb_dpe_filtre'])
+                # dict_dep_nb_dpe_filtre=calcul_nb_dpe(old_built_filter)
+                # df_nb_dpe_filtre = pd.DataFrame().from_dict(dict_dep_nb_dpe_filtre, orient='index', columns=['nb_dpe_filtre'])
+                
+                df_nb_dpe = pd.DataFrame().from_dict(get_nb_dpe(old_built_filter,['A/B']), orient='index', columns=['nb_dpe'])
+                # df_nb_dpe_seuils = pd.DataFrame().from_dict(get_nb_dpe(old_built_filter,seuils), orient='index', columns=['nb_dpe_seuils'])
+                
     
                 # Création d'une colonne dep_code commune aux deux df afin de pouvoir merge
                 df_bunching['dep_code'] = [dep.code for dep in df_bunching.index]  # Extrait le code du département
                 #df_bunching = df_bunching.reset_index(drop=True)  # Réinitialise l'index
                 
-                df_nb_dpe_filtre['dep_code'] = [dep.code for dep in df_nb_dpe_filtre.index]  # Extrait le code du département
+                df_nb_dpe['dep_code'] = [dep.code for dep in df_nb_dpe.index]  # Extrait le code du département
+                # df_nb_dpe_seuils['dep_code'] = [dep.code for dep in df_nb_dpe_seuils.index]
+                
     
-    
-                df_bunching = df_bunching.merge(df_nb_dpe_filtre, on='dep_code')
+                df_bunching = df_bunching.merge(df_nb_dpe, on='dep_code')
+                # df_bunching = df_bunching.merge(df_nb_dpe_seuils, on='dep_code')
                 df_bunching = df_bunching.set_index("dep_code")  # Réinitialise l'index
+                
+                # df_bunching[f'Somme_seuils_{seuils_sans_slash}_method_{method}_nb_seuils_calibrated'] = df_bunching[f'Somme_seuils_{seuils_sans_slash}_method_{method}'] * df_bunching.nb_dpe / df_bunching.nb_dpe_seuils
     
     
                 #sns.set()  
                 fig,ax = plt.subplots(figsize=(5,5),dpi=300)                  
-                sns.regplot(data=df_bunching, x="nb_dpe_filtre", y=f'Somme_seuils_{seuils_sans_slash}_method_{method}',ax=ax)
+                sns.regplot(data=df_bunching, x="nb_dpe", y=f'Somme_seuils_{seuils_sans_slash}_method_{method}',ax=ax)
                 ax.set_ylabel(f'Somme_seuils_{seuils_sans_slash}_method_{method}', fontsize=10)
                 ax.set_title(f"Corrélation entre le nombre de DPE et\nle bunching aux seuils {seuils_sans_slash}, méthode {method}")
                 # p.set_ylim(0.01, 0.04)
+                plt.show()
+                plt.close()
                 
-                df_bunching['inv_nb_dpe_filtre'] = 1/df_bunching.nb_dpe_filtre
+                # fig,ax = plt.subplots(figsize=(5,5),dpi=300)                  
+                # sns.regplot(data=df_bunching, x="nb_dpe", y=f'Somme_seuils_{seuils_sans_slash}_method_{method}_nb_seuils_calibrated',ax=ax)
+                # ax.set_ylabel(f'Somme_seuils_{seuils_sans_slash}_method_{method}_nb_seuils_calibrated', fontsize=10)
+                # ax.set_title(f"Corrélation entre le nombre de DPE et\nle bunching aux seuils {seuils_sans_slash}, méthode {method}")
+                # # p.set_ylim(0.01, 0.04)
+                # plt.show()
+                # plt.close()
                 
-                # 1/nb_dpe_filtre
-                fig,ax = plt.subplots(figsize=(5,5),dpi=300)                  
-                sns.regplot(data=df_bunching, x="inv_nb_dpe_filtre", y=f'Somme_seuils_{seuils_sans_slash}_method_{method}',ax=ax)
-                ax.set_ylabel(f'Somme_seuils_{seuils_sans_slash}_method_{method}', fontsize=10)
-                ax.set_title(f"Corrélation entre l'inverse du nombre de DPE et\nle bunching aux seuils {seuils_sans_slash}, méthode {method}")
-                ax.set_xlim([0., 1e-4])
+                df_bunching['inv_nb_dpe'] = 1/df_bunching.nb_dpe
+                
+                # # 1/nb_dpe_filtre
+                # fig,ax = plt.subplots(figsize=(5,5),dpi=300)                  
+                # sns.regplot(data=df_bunching, x="inv_nb_dpe_filtre", y=f'Somme_seuils_{seuils_sans_slash}_method_{method}',ax=ax)
+                # ax.set_ylabel(f'Somme_seuils_{seuils_sans_slash}_method_{method}', fontsize=10)
+                # ax.set_title(f"Corrélation entre l'inverse du nombre de DPE et\nle bunching aux seuils {seuils_sans_slash}, méthode {method}")
+                # ax.set_xlim([0., 1e-4])
 
 
         #france_bunching = france_bunching_method1.join(france_bunching_method2)
@@ -1093,6 +1146,7 @@ def main():
 
     if True : 
         seuils = ['D/E', 'E/F', 'F/G']
+        # seuils = ['E/F']
         itv_bunching = 10
         # attention : dcp là on a le même itv_bunching pour toutes les méthodes !!
     
