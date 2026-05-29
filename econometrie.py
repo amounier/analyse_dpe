@@ -25,10 +25,9 @@ from utils import etiquette_colors_dict,etiquette_ep_dict,etiquette_ep_seuils
 from distribution import calcul_bunching_france
 
 
-# todo : récup tension locative par villes
 
 
-def tension_immob_dep(path_tension, path_logements):
+def tension_immob_dep():
     """
     Détermination des proportions de logements dans chacune des 5 zones du zonage ABC pour chaque département.
     Rappel : 
@@ -52,7 +51,12 @@ def tension_immob_dep(path_tension, path_logements):
         Part des logements du département dans chacune des 5 zones 
         Colonnes :  dep_code (index)  |  total_logements  |  part_A = part de logements du département en zone A  |  part_Abis  |  part_B1  |  part_B2  |  part_C  
     """
-
+    # chemin vers le fichier Excel des tensions locatives par communes
+    path_tension = os.path.join('data','INSEE','Liste ensemble des communes - Zonage ABC 5 septembre 2025.xlsx')
+    
+    # chemin vers le fichier Excel du nombre de logements par communes
+    path_logements =  os.path.join('data','INSEE','logement-2022.xlsx')
+    
     # Import du zonage de la tension locative par commune
     df_zonage_ABC = pd.read_excel(path_tension, usecols=['CODGEO', 'DEP',  'Zonage en vigueur depuis le 5 septembre 2025'])
     df_zonage_ABC = df_zonage_ABC[~df_zonage_ABC['DEP'].isin(['971', '972', '973', '974', '975', '976'])] 
@@ -117,17 +121,10 @@ def main():
     output_folder = os.path.join('output',today)
     os.makedirs(output_folder, exist_ok=True)
     
-    # chemin vers le fichier Excel des tensions locatives par communes
-    path_tension = '/home/audrey/Documents/analyse_dpe/Liste ensemble des communes - Zonage ABC 5 septembre 2025.xlsx'
-    
-    # chemin vers le fichier Excel du nombre de logements par communes
-    path_logements = '/home/audrey/Documents/analyse_dpe/logement-2022.xlsx'
-    
-    
     if True:
        
         pd.options.display.max_columns = None
-        df_tension_immob_dep = tension_immob_dep(path_tension, path_logements)
+        df_tension_immob_dep = tension_immob_dep()
         print(df_tension_immob_dep)
         
 # =============================================================================
@@ -147,7 +144,8 @@ def main():
         # Fixation des paramètres de mesure du bunching
         old_built_filter = True
         method='diff_moyenne'
-        itv_bunching=5
+        # method='AMP'
+        itv_bunching=10
         window_size=50
             
         
@@ -173,24 +171,31 @@ def main():
         
         bunching = france_bunching[[f'Somme_seuils_{seuils_sans_slash}_method_{method}']]
         
-        
-        
         # Vecteur des paramètres
-        variables = df_tension_immob_dep[['part_A','part_Abis','part_B1','part_B2','part_C']]
+        variables = df_tension_immob_dep
         variables = sm.add_constant(variables)
         
+        # variables_list = ['part_A','part_Abis','part_B1','part_B2','part_C']
+        variables_list = ['part_A','part_C','zcl_H3','log_total_logements']
+        # variables_list = ['zcl_H3','log_total_logements']
         
         bunching = bunching.join(variables)
+        
+        # ajout de la zone climatique 
+        bunching["zcl"] = [Departement(e).climat for e in bunching.index]
+        bunching['zcl_H3'] = (bunching.zcl == 'H3').map(int)
+        
+        # ajout de l'inverse du nombre de logements
+        bunching['log_total_logements'] = np.log(bunching.total_logements)
 
         
-        model = sm.OLS(bunching[f'Somme_seuils_{seuils_sans_slash}_method_{method}'], bunching[['const','part_A','part_Abis','part_B1','part_B2','part_C']])
+        model = sm.OLS(bunching[f'Somme_seuils_{seuils_sans_slash}_method_{method}'], bunching[['const']+variables_list])
         results = model.fit()
         results.params
         print(results.summary())
         
         
-
-        p = sns.pairplot(data= bunching)
+        sns.pairplot(data= bunching[[f'Somme_seuils_{seuils_sans_slash}_method_{method}']+variables_list])
         # p.fig.suptitle(f"Corrélation entre les différentes méthodes de mesure du bunching\naux seuils {seuils_sans_slash}, old_built_filter = {old_built_filter}")
         # p.fig.subplots_adjust(top=0.92)
 
