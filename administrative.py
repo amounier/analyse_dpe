@@ -68,6 +68,15 @@ class Departement:
         self.region = dict_code_dep_name_reg.get(self.code)
         self.geometry = dict_code_dep_geom_dep.get(self.code)
         self.climat = dict_code_dep_code_zcl.get(self.code)
+        zcl_int_dict = {'H1a': 811,
+                        'H1b': 812,
+                        'H1c': 813,
+                        'H2a': 821,
+                        'H2b': 822,
+                        'H2c': 823,
+                        'H2d': 824,
+                        'H3': 830}
+        self.climat_int = zcl_int_dict.get(self.climat)
         self.prefecture = dict_name_dep_name_prf.get(self.name)
         
     def __str__(self):
