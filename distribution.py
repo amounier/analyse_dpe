@@ -17,7 +17,6 @@ import scipy.special as sc
 from datetime import date
 from sklearn.metrics import r2_score
 import seaborn as sns
-# sns.set_theme()
 
 from administrative import  list_dep_code, Departement, France, draw_departement_map
 from download import get_bdnb
@@ -314,24 +313,23 @@ def plot_dpe_distribution(path, dep_code, save, plot_mean, plot_median, window_s
     
     # Tracé de la moyenne/médiane glissante 
     if plot_mean:
-        plt.plot(formatage_dpe_data(dep_code, window_size, old_built_filter=old_built_filter)["conso_5_usages_ep_m2_arrondie"], formatage_dpe_data(dep_code, window_size, old_built_filter=old_built_filter)["nb_obs_moyenne"], "k", label='moyenne', linewidth = 0.7)
+        ax.plot(formatage_dpe_data(dep_code, window_size, old_built_filter=old_built_filter)["conso_5_usages_ep_m2_arrondie"], formatage_dpe_data(dep_code, window_size, old_built_filter=old_built_filter)["nb_obs_moyenne"], "k", label='moyenne', linewidth = 0.7)
         
     if plot_median:
-        plt.plot(formatage_dpe_data(dep_code, window_size, old_built_filter=old_built_filter)["conso_5_usages_ep_m2_arrondie"], formatage_dpe_data(dep_code, window_size, old_built_filter=old_built_filter)["nb_obs_mediane"], "r", label='mediane', linewidth = 0.7)
+        ax.plot(formatage_dpe_data(dep_code, window_size, old_built_filter=old_built_filter)["conso_5_usages_ep_m2_arrondie"], formatage_dpe_data(dep_code, window_size, old_built_filter=old_built_filter)["nb_obs_mediane"], "r", label='mediane', linewidth = 0.7)
     
     
     # Tracé fit de toutes les données dpe_data["conso_5_usages_ep_m2"]beta_centre_abs avec une loi beta : fonction scipy.beta.fit 
     if plot_fit: 
         pdf, _, _ = fit_dpe_data(dep_code, method='beta.fit', old_built_filter=old_built_filter)
-        plt.plot(list(counter_dict_sorted.keys()), pdf*nb_dpe, label='beta fit', linewidth = 1)
+        ax.plot(list(counter_dict_sorted.keys()), pdf*nb_dpe, label='beta fit', linewidth = 1)
             
     # Tracé fit de toutes les données : fonction curve_fit avec un modèle de loi beta (voir fonction fit_dpe_data)    
     if plot_curve_fit: 
         fit_dpe_data_df, r2_value, param, nb_dpe_filtre = fit_dpe_data(dep_code, method='curve_fit', old_built_filter=old_built_filter)
         x_data = fit_dpe_data_df['x_data']
         pdf = fit_dpe_data_df['y_beta_curve_fit']
-        # plt.plot(x_data, pdf*nb_dpe, "k--", label=f'curve_fit\n(R$^{{2}}$={r2_value:.2f})')  # ATTENTION todo il faut plutot multiplier par nb_dpe_filtre=y_data.sum() non ?
-        plt.plot(x_data, pdf*nb_dpe_filtre, "k--", label=f'curve_fit\n(R$^{{2}}$={r2_value:.2f})')
+        ax.plot(x_data, pdf*nb_dpe_filtre, "k--", label=f'curve_fit\n(R$^{{2}}$={r2_value:.2f})')
 
 
     ax.legend()    
@@ -448,26 +446,27 @@ def calcul_bunching(dep_code, method, itv_bunching, window_size, plot_ecart, pat
         
         # Tracé de l'écart entre les données réelles et le fit sur toutes les données
         if plot_ecart:
-            plt.figure()
-            plt.plot(fit_dpe_data_df.x_data, fit_dpe_data_df.y_difference, linewidth = 0.7)
+            fig, ax = plt.subplots(dpi=300)
+
+            ax.plot(fit_dpe_data_df.x_data, fit_dpe_data_df.y_difference, linewidth = 0.7)
             
-            plt.xlim([0,max_xlim])
-            #plt.ylim([-0.003, 0.009]) # correspond aux bornes pour la Haute-Marne 52 (max bunching)
-            #plt.ylim([-0.002, 0.006]) # correspond aux bornes pour la Vendée 85 (max somme bunching)
-            plt.hlines(y=0, xmin=0, xmax=max_xlim, color='k', linestyles='dashed', zorder=-1) # tracé de l'axe y=0 en arrière-plan
+            ax.set_xlim([0,max_xlim])
+            #ax.set_ylim([-0.003, 0.009]) # correspond aux bornes pour la Haute-Marne 52 (max bunching)
+            ax.set_ylim([-0.002, 0.006]) # correspond aux bornes pour la Vendée 85 (max somme bunching)
+            ax.hlines(y=0, xmin=0, xmax=max_xlim, color='k', linestyles='dashed', zorder=-1) # tracé de l'axe y=0 en arrière-plan
             
             # remplissage de l'aire du bunching
             for seuil in etiquette_ep_seuils.values():
                    condition_alentours_seuils = (fit_dpe_data_df.x_data > seuil - itv_bunching) & (fit_dpe_data_df.x_data <= seuil)
-                   plt.fill_between(fit_dpe_data_df.x_data, y1=fit_dpe_data_df.y_difference, y2=0, where=condition_alentours_seuils, alpha=0.3, color='red')
+                   ax.fill_between(fit_dpe_data_df.x_data, y1=fit_dpe_data_df.y_difference, y2=0, where=condition_alentours_seuils, alpha=0.3, color='red')
             
             if old_built_filter:
-                plt.title(f"Ecart entre la distribution des DPE (avant 1974) et la distribution beta\n({departement.name} - {departement.code})")
+                ax.set_title(f"Ecart entre la distribution des DPE (avant 1974) et la distribution beta\n({departement.name} - {departement.code})")
             else :
-                plt.title(f"Ecart entre la distribution des DPE et la distribution beta\n({departement.name} - {departement.code})")
-            plt.ylabel("Nombre de DPE de différence, normalisé")
-            plt.xlabel("Consommation annuelle en énergie primaire (kWh.m$^{-2}$)")
-            plt.xticks(ticks=[int(x) for x in list(set(list(np.asarray(list(etiquette_ep_dict.values())).flatten()))) if not np.isinf(x)] + [max_xlim])
+                ax.set_title(f"Ecart entre la distribution des DPE et la distribution beta\n({departement.name} - {departement.code})")
+            ax.set_ylabel("Nombre de DPE de différence, normalisé")
+            ax.set_xlabel("Consommation annuelle en énergie primaire (kWh.m$^{-2}$)")
+            ax.set_xticks(ticks=[int(x) for x in list(set(list(np.asarray(list(etiquette_ep_dict.values())).flatten()))) if not np.isinf(x)] + [max_xlim])
             
             # Enregistrement de la figure
             if old_built_filter:
@@ -501,33 +500,33 @@ def calcul_bunching(dep_code, method, itv_bunching, window_size, plot_ecart, pat
 
       # Tracé de l'écart entre les données réelles et le fit sur toutes les données
         if plot_ecart:
-          plt.figure()
-          plt.plot(fit_dpe_data_df.x_data, fit_dpe_data_df.y_difference, linewidth = 0.7)
-          
-          plt.xlim([0,max_xlim])
-          #plt.ylim([-0.003, 0.009]) # correspond aux bornes pour la Haute-Marne 52 (max bunching)
-          plt.ylim([-0.002, 0.006]) # correspond aux bornes pour la Vendée 85 (max somme bunching)
-          plt.hlines(y=0, xmin=0, xmax=max_xlim, color='k', linestyles='dashed', zorder=-1) # tracé de l'axe y=0 en arrière-plan
-          
-          # remplissage de l'aire du bunching
-          for seuil in etiquette_ep_seuils.values():
-                 condition_alentours_seuils = (fit_dpe_data_df.x_data > seuil - itv_bunching) & (fit_dpe_data_df.x_data <= seuil + itv_bunching)
-                 plt.fill_between(fit_dpe_data_df.x_data, y1=fit_dpe_data_df.y_difference, y2=0, where=condition_alentours_seuils, alpha=0.3, color='red')
-                 
-          if old_built_filter:
-              plt.title(f"Ecart entre la distribution des DPE (avant 1974) et la distribution beta\n({departement.name} - {departement.code})")
-          else :
-              plt.title(f"Ecart entre la distribution des DPE et la distribution beta\n({departement.name} - {departement.code})")
-          plt.ylabel("Nombre de DPE de différence, normalisé")
-          plt.xlabel("Consommation annuelle en énergie primaire (kWh.m$^{-2}$)")
-          plt.xticks(ticks=[int(x) for x in list(set(list(np.asarray(list(etiquette_ep_dict.values())).flatten()))) if not np.isinf(x)] + [max_xlim])
-          
-          # Enregistrement de la figure
-          if old_built_filter:
-              save_path = os.path.join(path,f'ecart_curve_fit_{dep_code}_method_{method}_itv_{itv_bunching}_kWh_old_built.png')  
-          else:
-              save_path = os.path.join(path,f'ecart_curve_fit_{dep_code}_method_{method}_itv_{itv_bunching}_kWh.png') 
-          plt.savefig(save_path, bbox_inches='tight')
+            fig, ax = plt.subplots(dpi=300)
+            ax.plot(fit_dpe_data_df.x_data, fit_dpe_data_df.y_difference, linewidth = 0.7)
+            
+            ax.set_xlim([0,max_xlim])
+            #ax.set_ylim([-0.003, 0.009]) # correspond aux bornes pour la Haute-Marne 52 (max bunching)
+            ax.set_ylim([-0.002, 0.006]) # correspond aux bornes pour la Vendée 85 (max somme bunching)
+            ax.hlines(y=0, xmin=0, xmax=max_xlim, color='k', linestyles='dashed', zorder=-1) # tracé de l'axe y=0 en arrière-plan
+              
+            # remplissage de l'aire du bunching
+            for seuil in etiquette_ep_seuils.values():
+                   condition_alentours_seuils = (fit_dpe_data_df.x_data > seuil - itv_bunching) & (fit_dpe_data_df.x_data <= seuil + itv_bunching)
+                   ax.fill_between(fit_dpe_data_df.x_data, y1=fit_dpe_data_df.y_difference, y2=0, where=condition_alentours_seuils, alpha=0.3, color='red')
+                   
+            if old_built_filter:
+                ax.set_title(f"Ecart entre la distribution des DPE (avant 1974) et la distribution beta\n({departement.name} - {departement.code})")
+            else :
+                ax.set_title(f"Ecart entre la distribution des DPE et la distribution beta\n({departement.name} - {departement.code})")
+            ax.set_ylabel("Nombre de DPE de différence, normalisé")
+            ax.set_xlabel("Consommation annuelle en énergie primaire (kWh.m$^{-2}$)")
+            ax.set_xticks(ticks=[int(x) for x in list(set(list(np.asarray(list(etiquette_ep_dict.values())).flatten()))) if not np.isinf(x)] + [max_xlim])
+             
+            # Enregistrement de la figure
+            if old_built_filter:
+                save_path = os.path.join(path,f'ecart_curve_fit_{dep_code}_method_{method}_itv_{itv_bunching}_kWh_old_built.png')  
+            else:
+                save_path = os.path.join(path,f'ecart_curve_fit_{dep_code}_method_{method}_itv_{itv_bunching}_kWh.png') 
+            plt.savefig(save_path, bbox_inches='tight')
 
         return bunching_df
     
@@ -560,35 +559,35 @@ def calcul_bunching(dep_code, method, itv_bunching, window_size, plot_ecart, pat
         print(f'Bunching (méthode {method}, window_size {window_size} kWh) pour {departement}, avec un intervalle de +-{itv_bunching} kWh/m2 autour des seuils, old_built_filter = {old_built_filter} : \n', bunching_df)
 
         
-      # Tracé de l'écart entre les données réelles et le fit sur toutes les données
+      # Tracé de l'écart entre les données réelles et la moyenne glissante sur window_size
         if plot_ecart:
-          plt.figure()
-          plt.plot(dpe_data_df.conso_5_usages_ep_m2_arrondie, dpe_data_df.y_diff_moyenne_norm, linewidth = 0.7)
-          
-          plt.xlim([0,max_xlim])
-          #plt.ylim([-0.003, 0.009]) # correspond aux bornes pour la Haute-Marne 52 (max bunching)
-          plt.ylim([-0.002, 0.006]) # correspond aux bornes pour la Vendée 85 (max somme bunching)
-          plt.hlines(y=0, xmin=0, xmax=max_xlim, color='k', linestyles='dashed', zorder=-1) # tracé de l'axe y=0 en arrière-plan
-          
-          # remplissage de l'aire du bunching
-          for seuil in etiquette_ep_seuils.values():
-                 condition_alentours_seuils = (dpe_data_df.conso_5_usages_ep_m2_arrondie > seuil - itv_bunching) & (dpe_data_df.conso_5_usages_ep_m2_arrondie <= seuil + itv_bunching)
-                 plt.fill_between(dpe_data_df.conso_5_usages_ep_m2_arrondie, y1=dpe_data_df.y_diff_moyenne_norm, y2=0, where=condition_alentours_seuils, alpha=0.3, color='red')
-                 
-          if old_built_filter:
-              plt.title(f"Ecart entre la distribution des DPE (avant 1974) et la moyenne glissante\n({departement.name} - {departement.code})")
-          else :
-              plt.title(f"Ecart entre la distribution des DPE et la moyenne glissante\n({departement.name} - {departement.code})") # todo: rajt window_size partout
-          plt.ylabel("Nombre de DPE de différence, normalisé")
-          plt.xlabel("Consommation annuelle en énergie primaire (kWh.m$^{-2}$)")
-          plt.xticks(ticks=[int(x) for x in list(set(list(np.asarray(list(etiquette_ep_dict.values())).flatten()))) if not np.isinf(x)] + [max_xlim])
-          
-          # Enregistrement de la figure
-          if old_built_filter:
-              save_path = os.path.join(path,f'ecart_moy_gliss_sur_{window_size}_kWh_{dep_code}_method_{method}_itv_{itv_bunching}_kWh_old_built.png')  
-          else:
-              save_path = os.path.join(path,f'ecart_moy_gliss_sur_{window_size}_kWh_{dep_code}_method_{method}_itv_{itv_bunching}_kWh.png')   
-          plt.savefig(save_path, bbox_inches='tight')
+            fig, ax = plt.subplots(dpi=300)
+            ax.plot(dpe_data_df.conso_5_usages_ep_m2_arrondie, dpe_data_df.y_diff_moyenne_norm, linewidth = 0.7)
+            
+            ax.set_xlim([0,max_xlim])
+            #ax.set_ylim([-0.003, 0.009]) # correspond aux bornes pour la Haute-Marne 52 (max bunching)
+            ax.set_ylim([-0.002, 0.006]) # correspond aux bornes pour la Vendée 85 (max somme bunching)
+            ax.hlines(y=0, xmin=0, xmax=max_xlim, color='k', linestyles='dashed', zorder=-1) # tracé de l'axe y=0 en arrière-plan
+            
+            # remplissage de l'aire du bunching
+            for seuil in etiquette_ep_seuils.values():
+                   condition_alentours_seuils = (dpe_data_df.conso_5_usages_ep_m2_arrondie > seuil - itv_bunching) & (dpe_data_df.conso_5_usages_ep_m2_arrondie <= seuil + itv_bunching)
+                   ax.fill_between(dpe_data_df.conso_5_usages_ep_m2_arrondie, y1=dpe_data_df.y_diff_moyenne_norm, y2=0, where=condition_alentours_seuils, alpha=0.3, color='red')
+                   
+            if old_built_filter:
+                ax.set_title(f"Ecart entre la distribution des DPE (avant 1974) et la moyenne glissante\n({departement.name} - {departement.code})")
+            else :
+                ax.set_title(f"Ecart entre la distribution des DPE et la moyenne glissante\n({departement.name} - {departement.code})") # todo: rajt window_size partout
+            ax.set_ylabel("Nombre de DPE de différence, normalisé")
+            ax.set_xlabel("Consommation annuelle en énergie primaire (kWh.m$^{-2}$)")
+            ax.set_xticks(ticks=[int(x) for x in list(set(list(np.asarray(list(etiquette_ep_dict.values())).flatten()))) if not np.isinf(x)] + [max_xlim])
+            
+            # Enregistrement de la figure
+            if old_built_filter:
+                save_path = os.path.join(path,f'ecart_moy_gliss_sur_{window_size}_kWh_{dep_code}_method_{method}_itv_{itv_bunching}_kWh_old_built.png')  
+            else:
+                save_path = os.path.join(path,f'ecart_moy_gliss_sur_{window_size}_kWh_{dep_code}_method_{method}_itv_{itv_bunching}_kWh.png')   
+            plt.savefig(save_path, bbox_inches='tight')
 
         
         return bunching_df
@@ -596,8 +595,9 @@ def calcul_bunching(dep_code, method, itv_bunching, window_size, plot_ecart, pat
     
     
 # =============================================================================
+# OLD VERSION AVEC BETA.FIT ET PAS DE DATAFRAME
 
-#     if method == 'diff_beta_old': # OLD VERSION AVEC BETA.FIT ET PAS DE DATAFRAME
+#     if method == 'diff_beta_old': 
 #         
 #         pdf = fit_dpe_data(dep_code, method='beta.fit')
 #         difference = list(counter_dict_sorted.values()) - pdf*nb_dpe
@@ -630,9 +630,7 @@ def calcul_bunching(dep_code, method, itv_bunching, window_size, plot_ecart, pat
 #             save_path = os.path.join(path,'ecart_beta.fit_{}.png'.format(dep_code))
 #             plt.savefig(save_path, bbox_inches='tight')
 #     
-#         return bunching    Calcul du bunching dans le département dep_code vec plusieurs méthodes possibles.
-
-# 
+#         return bunching   
 # =============================================================================
 
 #%%
@@ -882,14 +880,14 @@ def main():
     os.makedirs(output_folder, exist_ok=True)
     
     dep = Departement('84')
-    old_built_filter = True
+    old_built_filter = False
     window_size = 50  # fenêtre de la moyenne glissante (rolling de la méthode 'diff_moyenne')
     
     
     # DISTRIBUTION DES DPE
     
     # tracé de la distribution des dpe du département
-    if True:
+    if False:
         #dpe_data = get_dpe_consumption(dep.code) # cette ligne ne sert a rien car déjà dans plot_dpe_distribution ?
         plot_dpe_distribution(output_folder,dep.code, save=True, plot_mean=True, plot_median=False, window_size = window_size, plot_fit=False, plot_curve_fit=True, old_built_filter=old_built_filter, max_xlim=600)
     
@@ -908,7 +906,7 @@ def main():
     
         
     # calcul du bunching du département
-    if True:
+    if False:
         bunching_dep = calcul_bunching(dep.code, method=method, itv_bunching=itv_bunching, window_size=window_size, plot_ecart = True, path=output_folder, old_built_filter=old_built_filter, verbose=True)
         
         # Affichage somme bunching sur l'ensemble des seuils
@@ -938,7 +936,7 @@ def main():
         
         
     # carte du bunching      
-    if True:
+    if False:
         today = pd.Timestamp(date.today()).strftime('%Y%m%d')
         output_folder = os.path.join('output',today)
         os.makedirs(output_folder, exist_ok=True)
@@ -1066,7 +1064,7 @@ def main():
                 fig,ax = plt.subplots(figsize=(5,5),dpi=300)                  
                 sns.regplot(data=df_bunching, x="inv_nb_dpe_filtre", y=f'Somme_seuils_{seuils_sans_slash}_method_{method}',ax=ax)
                 ax.set_ylabel(f'Somme_seuils_{seuils_sans_slash}_method_{method}', fontsize=10)
-                ax.set_title(f"Corrélation entre le nombre de DPE et\nle bunching aux seuils {seuils_sans_slash}, méthode {method}")
+                ax.set_title(f"Corrélation entre l'inverse du nombre de DPE et\nle bunching aux seuils {seuils_sans_slash}, méthode {method}")
                 ax.set_xlim([0., 1e-4])
 
 
@@ -1096,14 +1094,16 @@ def main():
     if True : 
         seuils = ['D/E', 'E/F', 'F/G']
         itv_bunching = 10
+        # attention : dcp là on a le même itv_bunching pour toutes les méthodes !!
     
         # formatage d'une chaîne de caractère simplifiée pour identifier les seuils
         seuils_sans_slash = '_'.join(seuils)
         seuils_sans_slash = seuils_sans_slash.replace("/","")
         
         df_compare = df_compare_methods(seuils, output_folder, old_built_filter=old_built_filter, itv_bunching=itv_bunching)        
-        
-        p = sns.pairplot(data= df_compare[[e for e in df_compare.columns if e.startswith('Méthode')]])#, hue='nb_dpe_filtre') #hue='département')
+                   
+
+        p = sns.pairplot(data= df_compare[[e for e in df_compare.columns if e.startswith('Méthode')]])#, hue='nb_dpe_filtre')    
         p.fig.suptitle(f"Corrélation entre les différentes méthodes de mesure du bunching\naux seuils {seuils_sans_slash}, old_built_filter = {old_built_filter}")
         p.fig.subplots_adjust(top=0.92)
 
