@@ -22,7 +22,7 @@ import statsmodels.api as sm
 
 from administrative import  list_dep_code, Departement, France, draw_departement_map
 from utils import etiquette_colors_dict,etiquette_ep_dict,etiquette_ep_seuils
-from distribution import calcul_bunching_france
+from distribution import calcul_bunching_france, cut_france_bunching
 
 
 
@@ -105,7 +105,12 @@ def get_nb_diagnostiqueur_dep():
     return data_count
     
 
+def get_nb_rp_loc():
+    # Nombre de résidences principales occupées par locataires
+    
+    df_nb_rp_loc = pd.read_excel(os.path.join('data','INSEE','base-cc-logement-2022.xlsx'), names = ['CODGEO', 'nb_rp_loc'], usecols=['CODGEO', 'P22_RP_LOC'], skiprows=5)
 
+    return df_nb_rp_loc
     
 #%% ===========================================================================
 # script principal
@@ -148,25 +153,10 @@ def main():
         itv_bunching=10
         window_size=50
             
-        
-        france_bunching = calcul_bunching_france(output_folder, method, itv_bunching, window_size, old_built_filter, max_xlim = 600, verbose=False, force=True)
-        
-        
         seuils = ['D/E', 'E/F', 'F/G']
         
-        # formatage d'une chaîne de caractère simplifiée pour identifier les seuils
-        seuils_sans_slash = '_'.join(seuils)
-        seuils_sans_slash = seuils_sans_slash.replace("/","")
-        
-        # implémentation d'une liste du nom exact des colonnes de france_bunching à sélectionner
-        noms_colonnes_seuils = []
-        for seuil in seuils:
-            colonne_seuil = [colonne for colonne in france_bunching.columns if colonne.startswith(f'{seuil}')]
-            nom_colonne = colonne_seuil[0]
-            noms_colonnes_seuils.append(nom_colonne)
-
-        france_bunching_cut = france_bunching.filter(items = noms_colonnes_seuils)  
-        
+        france_bunching = calcul_bunching_france(output_folder, method, itv_bunching, window_size, old_built_filter, max_xlim = 600, verbose=False, force=True)
+        france_bunching_cut, seuils_sans_slash = cut_france_bunching(france_bunching, seuils)
         france_bunching[f'Somme_seuils_{seuils_sans_slash}_method_{method}'] = france_bunching_cut.sum(axis=1) # on somme sur les lignes des colonnes conservées    
         
         bunching = france_bunching[[f'Somme_seuils_{seuils_sans_slash}_method_{method}']]
@@ -177,10 +167,11 @@ def main():
         
         # variables_list = ['part_A','part_Abis','part_B1','part_B2','part_C']
         # variables_list = ['part_A','part_C','zcl_Tref','log_total_logements','nb_diagnostiqueurs_dep']
-        variables_list = ['part_C','part_A','log_total_logements']
+        variables_list = ['part_C','part_A','log_total_logements', 'nb_rp_loc']
         
         bunching = bunching.join(variables)
-        bunching = bunching.join(get_nb_diagnostiqueur_dep())
+        #bunching = bunching.join(get_nb_diagnostiqueur_dep())
+        bunching = bunching.join(get_nb_rp_loc())
         
         # ajout de la zone climatique 
         bunching["zcl"] = [Departement(e).climat for e in bunching.index]
