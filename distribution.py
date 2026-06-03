@@ -47,6 +47,9 @@ def get_dpe_consumption(dep_code, old_built_filter=False):
     
     # Définition du nom du fichier final
     save_name = f'conso_5_usages_millesime_2025-07_dep{dep_code}.csv'
+    # save_name = f'conso_5_usages_millesime_2026-02_dep{dep_code}.csv'
+
+    
     if old_built_filter:
         save_name = save_name.replace('.csv','_old_built.csv')
         
@@ -1043,16 +1046,16 @@ def main():
     output_folder = os.path.join('output',today)
     os.makedirs(output_folder, exist_ok=True)
     
-    dep = Departement('06')
-    old_built_filter = True
+    dep = Departement('75')
+    old_built_filter = False
     window_size = 50  # fenêtre de la moyenne glissante (rolling de la méthode 'diff_moyenne')
     
     
     # DISTRIBUTION DES DPE
     
     # tracé de la distribution des dpe du département
-    if False:
-        #dpe_data = get_dpe_consumption(dep.code) # cette ligne ne sert a rien car déjà dans plot_dpe_distribution ?
+    if True:
+        #dpe_data = get_dpe_consumption(dep.code)
         plot_dpe_distribution(output_folder,dep.code, save=True, plot_mean=True, plot_median=False, window_size = window_size, plot_fit=False, plot_curve_fit=False, old_built_filter=old_built_filter, max_xlim=600)
     
     
@@ -1069,7 +1072,7 @@ def main():
     
     
     # calcul du bunching du département
-    if False:
+    if True:
         bunching_dep = calcul_bunching(dep.code, method=method, itv_bunching=itv_bunching, window_size=window_size, plot_ecart = True, path=output_folder, old_built_filter=old_built_filter, verbose=True)
         
         # Affichage somme bunching sur l'ensemble des seuils
@@ -1086,7 +1089,7 @@ def main():
         
         
     # carte du bunching      
-    if True:
+    if False:
         today = pd.Timestamp(date.today()).strftime('%Y%m%d')
         output_folder = os.path.join('output',today)
         os.makedirs(output_folder, exist_ok=True)
@@ -1187,7 +1190,7 @@ def main():
             plt.show()
             plt.close()
             
-            if True: # todo : creer une fonction qui fait ça
+            if True: # todo : creer une fonction qui fait çacut_france
                 # Regplot entre bunching et nb_dpe_filtre
                 
                 df_bunching = pd.DataFrame().from_dict(dict_dep_bunching, orient='index', columns=[f'Somme_seuils_{seuils_sans_slash}_method_{method}'])

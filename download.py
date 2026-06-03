@@ -51,16 +51,23 @@ def download_bdnb(dep_code, force=False):
     os.makedirs(save_path, exist_ok=True)
     existing_files = os.listdir(save_path)
 
-    dep = dep_code.lower()
+    dep = dep_code.lower() # pour aller avec l'url ou la Corse est en minuscule 2a 2b
     
     # Définition du nom du fichier final
     file = f'open_data_millesime_2025-07-a_dep{dep}_gpkg'
+    
+    # Pour télécharger la version 2026 :
+    # file = f'open_data_millesime_2026-02-a_dep{dep}_gpkg'
+
     file_path = os.path.join(save_path,file)
     
     # Téléchargement seulement si nécessaire
     if file not in existing_files or force:
         # url de téléchargement
         url = f'https://open-data.s3.fr-par.scw.cloud/bdnb_millesime_2025-07-a/millesime_2025-07-a_dep{dep}/open_data_millesime_2025-07-a_dep{dep}_gpkg.zip'
+        
+        # Pour télécharger la version 2026 :
+        # url = f'https://open-data.s3.fr-par.scw.cloud/bdnb_millesime_2026-02-a/millesime_2026-02-a_dep{dep}/open_data_millesime_2026-02-a_dep{dep}_gpkg.zip'
         
         subprocess.run(f"wget -P {save_path} {url}",shell=True)
         subprocess.run(f"unzip {file_path+'.zip'} -d {file_path}",shell=True)
@@ -103,6 +110,9 @@ def get_bdnb(dep_code='75', chunksize=5e4):
     
     dep = dep_code.lower()
     file = os.path.join('data','BDNB',f'open_data_millesime_2025-07-a_dep{dep}_gpkg','gpkg','bdnb.gpkg')
+    
+    # file = os.path.join('data','BDNB',f'open_data_millesime_2026-02-a_dep{dep}_gpkg','gpkg','bdnb.gpkg')
+
     
     try:
         bdnb_dpe_logement = dask_geopandas.read_file(file, chunksize=chunksize, layer='dpe_logement')
@@ -280,7 +290,7 @@ def main():
         download_bdnb(dep.code)
         
     #%% Téléchargement des données BDNB de tous les départements (France hexagonale)    
-    if True:
+    if False:
         france = France()
         for dep in france.departements :
             print(dep)
@@ -288,8 +298,13 @@ def main():
 
     
     #%% Test d'une carte locale
-    if False:
-        bat_groupe_id = 'bdnb-bg-FHEF-WAAZ-S5XC'
+    if True:
+        #bat_groupe_id = 'bdnb-bg-FHEF-WAAZ-S5XC' # suspicion manipulation dpe (Paris)
+        # bat_groupe_id = 'bdnb-bg-V8HA-KABB-ZCSX' # immeuble
+        # bat_groupe_id = 'bdnb-bg-8M4H-6M5W-M3JE' # 14 rue Brillat Savarin
+        # bat_groupe_id = 'bdnb-bg-BUZK-W1C9-14P3' # 704 logements
+        bat_groupe_id = 'bdnb-bg-129J-JTEH-Z4XN' # bat sans adresse
+
         
         neighbourhood_map(bat_groupe_id, output_folder)
         infos = get_batiment_groupe_infos(bat_groupe_id)

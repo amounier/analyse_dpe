@@ -96,6 +96,7 @@ def get_nb_diagnostiqueur_dep():
     data = pd.read_csv(os.path.join('data','MTE','annuaire-diagnostiqueurs-immobiliers.csv'),sep=';')
     data = data[data['Type de certificat'].str.contains('DPE')]
     data['CP'] = [f"{e:05d}" for e in data.CP]
+    data.drop_duplicates(subset = ["N° de certificat", "Organisme", "CP"], inplace = True)
     data = data[~data.CP.str.startswith('97')] # uniquement territoire hexagonal
     data = data[~data.CP.str.startswith('20')] # hors corse (2A et 2B aggrégé)
     data['dep_code'] = [Departement(e[:2]).code for e in data.CP]
@@ -108,8 +109,14 @@ def get_nb_diagnostiqueur_dep():
 def get_nb_rp_loc():
     # Nombre de résidences principales occupées par locataires
     
-    df_nb_rp_loc = pd.read_excel(os.path.join('data','INSEE','base-cc-logement-2022.xlsx'), names = ['CODGEO', 'nb_rp_loc'], usecols=['CODGEO', 'P22_RP_LOC'], skiprows=5)
+    df_nb_rp_loc = pd.read_excel(os.path.join('data','INSEE','base-cc-logement-2022.xlsx'), usecols=['CODGEO', 'P22_RP_LOC'], skiprows=5)  # names = ['CODGEO', 'nb_rp_loc']
+    df_nb_rp_loc.set_index('CODGEO', inplace=True)
+    df_nb_rp_loc = df_nb_rp_loc[~df_nb_rp_loc.index.str.startswith('97')] # uniquement territoire hexagonal
+    df_nb_rp_loc = df_nb_rp_loc[~df_nb_rp_loc.index.str.startswith('20')] # hors corse (2A et 2B aggrégé)
+    df_nb_rp_loc['dep_code'] = [Departement(e[:2]).code for e in df_nb_rp_loc.index]
+    df_nb_rp_loc = df_nb_rp_loc.groupby('dep_code')[['P22_RP_LOC']].sum()
 
+    
     return df_nb_rp_loc
     
 #%% ===========================================================================
@@ -148,7 +155,7 @@ def main():
         
         # Fixation des paramètres de mesure du bunching
         old_built_filter = True
-        method='diff_moyenne'
+        method='diff_moyenne_gauche_itv'
         # method='AMP'
         itv_bunching=10
         window_size=50
@@ -166,11 +173,11 @@ def main():
         variables = sm.add_constant(variables)
         
         # variables_list = ['part_A','part_Abis','part_B1','part_B2','part_C']
-        # variables_list = ['part_A','part_C','zcl_Tref','log_total_logements','nb_diagnostiqueurs_dep']
-        variables_list = ['part_C','part_A','log_total_logements', 'nb_rp_loc']
+        # variables_list = ['part_A','part_C','zcl_Tref','total_logements','nb_diagnostiqueurs_dep']
+        variables_list = ['part_C','part_A','total_logements', 'P22_RP_LOC']
         
         bunching = bunching.join(variables)
-        #bunching = bunching.join(get_nb_diagnostiqueur_dep())
+        # bunching = bunching.join(get_nb_diagnostiqueur_dep())
         bunching = bunching.join(get_nb_rp_loc())
         
         # ajout de la zone climatique 
@@ -190,9 +197,16 @@ def main():
         print(results.summary())
         
         
-        sns.pairplot(data= bunching[[f'Somme_seuils_{seuils_sans_slash}_method_{method}']+variables_list])
-        # p.fig.suptitle(f"Corrélation entre les différentes méthodes de mesure du bunching\naux seuils {seuils_sans_slash}, old_built_filter = {old_built_filter}")
-        # p.fig.subplots_adjust(top=0.92)
+        p = sns.pairplot(data= bunching[[f'Somme_seuils_{seuils_sans_slash}_method_{method}']+variables_list])
+        p.fig.suptitle(f"Corrélation entre le bunching méthode {method} et d'autres variables, old_built_filter = {old_built_filter}")
+        p.fig.subplots_adjust(top=0.96)
+        
+        if True :
+            if old_built_filter:
+                save_path = os.path.join(output_folder,f'Pairplot_correlation_bunching_methode_{method}_old_built.png') 
+            else:
+                save_path = os.path.join(output_folder,f'Pairplot_correlation_bunching_methode_{method}.png') 
+            plt.savefig(save_path, bbox_inches='tight')
 
 
     tac = time.time()
