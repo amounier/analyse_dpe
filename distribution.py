@@ -48,7 +48,6 @@ def get_dpe_consumption(dep_code, old_built_filter=False):
     # Définition du nom du fichier final
     save_name = f'conso_5_usages_millesime_2025-07_dep{dep_code}.csv'
     # save_name = f'conso_5_usages_millesime_2026-02_dep{dep_code}.csv'
-
     
     if old_built_filter:
         save_name = save_name.replace('.csv','_old_built.csv')
