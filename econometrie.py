@@ -6,22 +6,16 @@ Created on Wed May 27 17:05:21 2026
 @author: audrey
 """
 
-# todo : enlever trucs inutiles
 import time
 import numpy as np
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy.stats import beta, zscore # attention, beta (variable aléatoire) =/= sc.beta (fonction)
-from scipy.optimize import curve_fit
-import scipy.special as sc 
 from datetime import date
-from sklearn.metrics import r2_score
 import seaborn as sns
 import statsmodels.api as sm
 
-from administrative import  list_dep_code, Departement, France, draw_departement_map
-from utils import etiquette_colors_dict,etiquette_ep_dict,etiquette_ep_seuils
+from administrative import  list_dep_code, Departement
 from distribution import calcul_bunching_france, cut_france_bunching
 
 

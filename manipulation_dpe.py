@@ -28,7 +28,11 @@ from urllib.request import urlopen, Request
 from PIL import Image
 from datetime import date
 from pyogrio.errors import DataSourceError
+from urllib.error import HTTPError
+
 import seaborn as sns
+import plotly.io as pio
+pio.renderers.default='browser'
 import plotly.graph_objects as go
 from pySankey.sankey import sankey
 
@@ -98,11 +102,23 @@ def filter_bdnb_individual(dep_code, force):
     return bdnb_filter_individual
 
 
+# %%
 
-def filter_manipulated(bdnb_df, surface_gap = 1, period = 30): # todo: rajouter condition sur surface ?
+def filter_manipulated(dep_code, plot_surface_evolution = True, surface_gap = 1, period = 30): # todo: rajouter condition sur surface ?
 # todo : exclure DPE identiques fait le meme jour = doublons ? verifier que meme infos détaillées ou pas
     """
     Identification des bâtiments ayant calculés des DPE .
+    
+    Parameters
+    ----------
+    dep_code : str
+        code du departement.
+    plot_surface_evolution : boolean, optional
+        plot l'évolution des déclarations de surfaces du logement entre deux DPEs successifs.
+    surface_gap : int
+        écart de surface toléré avant de considérer que les deux logements sont différents.
+    period : int
+        écart de temps maximal entre deux DPE successifs avant de considérer que des rénovations énergétiques ont pu avoir lieu.
 
     Returns
     -------
@@ -117,6 +133,9 @@ def filter_manipulated(bdnb_df, surface_gap = 1, period = 30): # todo: rajouter 
             - second_epc_surf : surface renseignée lors du calcul du 2e DPE
             - second_epc : classe du deuxième DPE calculé (compris entre ‘A’ et ‘G’).
     """
+    
+    departement = Departement(dep_code)
+    bdnb_df = filter_bdnb_individual(dep_code, force=False) # prend du temps si non stocké en .csv
     
     # on conserve uniquement les bâtiments qui ont plus d'un DPE
     bat_many_dpe = bdnb_df['batiment_groupe_id'].value_counts() # décompte du nb de dpe par bâtiment
@@ -149,15 +168,34 @@ def filter_manipulated(bdnb_df, surface_gap = 1, period = 30): # todo: rajouter 
     
     # df_epc_evolution = df_epc_evolution.reset_index(drop=True) # pour nettoyer colonne inutile
     
-    
-    # if surface_condition: 
+    df_epc_evolution['surface_diff'] =  df_epc_evolution.second_epc_surf - df_epc_evolution.first_epc_surf
+
+    if plot_surface_evolution: 
+        fig, ax = plt.subplots(figsize=(5,5), dpi=300)
+        df_epc_evolution.hist(column='surface_diff', ax=ax, bins=300, color='k')
         
+        ax.set_title(f"Evolution des surfaces déclarées entre deux DPE successifs\n({departement.name} - {departement.code}, N={len(df_epc_evolution)})")
+        ax.set_ylabel("Nombre d'observations")
+        ax.set_xlabel("Différence entre les deux surfaces")
+        
+        ax.set_xlim([-100,100])
+        
+        surface_manip_count_1 = len(df_epc_evolution[df_epc_evolution.surface_diff != 0])
+        surface_manip_count_1_percent = surface_manip_count_1 / len(df_epc_evolution) *100
+        print(f'Nombre de modifications de surface non nulles pour le département {dep_code} :', surface_manip_count_1, f'parmi N={len(df_epc_evolution)} ({surface_manip_count_1_percent:.1f} %)')
+                
+        surface_manip_count_2 = len(df_epc_evolution) - len(df_epc_evolution[(-surface_gap < df_epc_evolution.surface_diff) & (df_epc_evolution.surface_diff < surface_gap)])
+        surface_manip_count_2_percent = surface_manip_count_2 / len(df_epc_evolution) *100
+        print(f'Nombre de modifications de surface supérieures à +-{surface_gap} m2 pour le département {dep_code} :', surface_manip_count_2, f'parmi N={len(df_epc_evolution)} ({surface_manip_count_2_percent:.1f} %)')
+
     
     return df_epc_evolution   
     
 
+# %%
 
-def plot_heatmap(dep_code, frequency):
+
+def plot_heatmap(dep_code, frequency, surface_gap = 1, period = 30):
     """
     Formate un DataFrame de comparaison de DPE successifs en un DataFrame 2D comptant les évolutions entre classes.
 
@@ -182,9 +220,7 @@ def plot_heatmap(dep_code, frequency):
     os.makedirs(output_folder_heatmap, exist_ok=True)
     existing_files = os.listdir(output_folder_heatmap)
     
-    
-    bdnb_df = filter_bdnb_individual(dep_code, force=False) # prend du temps je pense
-    df_epc_evolution = filter_manipulated(bdnb_df, surface_gap = 1, period = 30)
+    df_epc_evolution = filter_manipulated(dep_code, plot_surface_evolution = False, surface_gap = surface_gap, period = period)
     
     
     # Décompte de la fréquence des transitions avec crosstab()
@@ -193,15 +229,11 @@ def plot_heatmap(dep_code, frequency):
         columns=df_epc_evolution['first_epc'],  # Colonnes = 1er DPE
     )
     
-    # Remplir les classes manquantes (A à G) avec 0
+    # Remplissage des classes manquantes avec 0
     classes = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
     df_heatmap = df_heatmap.reindex(index=classes, columns=classes, fill_value=0)
-    
-    
     if frequency:
-        df_heatmap = (df_heatmap/len(df_epc_evolution))*100
-        df_heatmap = df_heatmap.round(1)
-        
+        df_heatmap = (df_heatmap/len(df_epc_evolution))*100        
 
     # Pour afficher seulement les valeurs non nulles de la matrice
     annot = df_heatmap
@@ -222,8 +254,6 @@ def plot_heatmap(dep_code, frequency):
         ax = sns.heatmap(df_heatmap, ax=ax, annot=annot, fmt="", cmap='bone_r', cbar_ax=cbar_ax,cbar=True,cbar_kws={'label':"Nombre d'observations"})
     
     ax.set_title(f'{departement.name} - {departement.code}, N={len(df_epc_evolution)}')
-    # ax.yaxis.set_inverted(True)
-    # ax.invert_yaxis()
     for spine in ax.spines.values():
         spine.set_visible(True)
     for spine in cbar_ax.spines.values():
@@ -242,7 +272,7 @@ def plot_heatmap(dep_code, frequency):
     plt.show()
 
 
-    return df_heatmap
+    return 
 
 
 
@@ -254,52 +284,42 @@ def plot_pysankey(df_epc_evolution):
 
 
 
-def plotly_sankey(dep_code):
+def plotly_sankey(dep_code, surface_gap, period):
     
     departement = Departement(dep_code)
+    output_folder_sankey = os.path.join('output', 'sankey diagram')
+    os.makedirs(output_folder_sankey, exist_ok=True)
     
-    bdnb_df = filter_bdnb_individual(dep_code, force=False) # prend du temps je pense
-    df_epc_evolution = filter_manipulated(bdnb_df, surface_gap = 1, period = 30)
-    
+    df_epc_evolution = filter_manipulated(dep_code, plot_surface_evolution = False, surface_gap = surface_gap, period = period)
+
         
-    # Compter les transitions entre chaque paire de classes DPE
+    # Décompte des transitions entre chaque paire de classes DPE
     transition_counts = df_epc_evolution.groupby(['first_epc', 'second_epc']).size().reset_index(name='count')
     
-    # Créer les labels pour les nœuds (7 initiaux + 7 finaux)
-    labels = [f"{cls}_initial" for cls in ['A', 'B', 'C', 'D', 'E', 'F', 'G']] + [f"{cls}_final" for cls in ['A', 'B', 'C', 'D', 'E', 'F', 'G']]
+    # Labels des noeuds (7 initiaux + 7 finaux)
+    labels = [f"{classe}_initial" for classe in ['A', 'B', 'C', 'D', 'E', 'F', 'G']] + [f"{classe}_final" for classe in ['A', 'B', 'C', 'D', 'E', 'F', 'G']]
+    label_to_index = {label: idx for idx, label in enumerate(labels)} # indices correspondants à chaque noeud
     
-    # Créer un mapping entre les classes et leurs indices
-    label_to_index = {label: idx for idx, label in enumerate(labels)}
-    
-    # Préparer les sources, cibles et valeurs pour le Sankey
     sources = transition_counts['first_epc'].map(lambda x: label_to_index[f"{x}_initial"])
     targets = transition_counts['second_epc'].map(lambda x: label_to_index[f"{x}_final"])
     values = transition_counts['count']
     
-    # Associer chaque noeud à la couleur de sa classe initiale
+    # Couleur des noeuds
     node_colors = etiquette_colors_dict.values()
-    # Convertir en format RGBA (ajout de l'opacité à 0.8 par exemple)
-    node_colors_rgba = [
-        f"rgba({int(r*255)}, {int(g*255)}, {int(b*255)}, 0.8)"
-        for r, g, b in node_colors
-        ]
+    # Conversion en format RGBA
+    node_colors_rgba = [f"rgba({int(r*255)}, {int(g*255)}, {int(b*255)}, 1)" for r, g, b in node_colors]
     
-    # Associer chaque lien à la couleur de sa classe initiale
+    # Couleur de chaque lien en fonction de sa classe initiale
     link_colors = transition_counts['first_epc'].map(etiquette_colors_dict)
-    # Convertir en format RGBA (ajout de l'opacité à 0.8 par exemple)
-    link_colors_rgba = [
-        f"rgba({int(r*255)}, {int(g*255)}, {int(b*255)}, 0.8)"
-        for r, g, b in link_colors
-        ]
+    # Conversion en format RGBA (opacité à 0.8)
+    link_colors_rgba = [f"rgba({int(r*255)}, {int(g*255)}, {int(b*255)}, 0.8)" for r, g, b in link_colors]
     
-    # Créer le diagramme de Sankey
+    
     fig = go.Figure(go.Sankey(
+        arrangement = 'snap',
         node=dict(
-            pad=15,
-            thickness=20,
-            line=dict(color="black", width=0.5),
-            label=[label.replace("_initial", "").replace("_final", "") for label in labels],  # Affiche juste A, B, C, etc.
-            color= node_colors_rgba + node_colors_rgba  # Couleurs différentes pour les deux côtés
+            label=[label.replace("_initial", "").replace("_final", "") for label in labels],
+            color= node_colors_rgba + node_colors_rgba
         ),
         link=dict(
             source=sources,
@@ -311,9 +331,21 @@ def plotly_sankey(dep_code):
     
     # Personnaliser la disposition pour séparer les deux groupes de nœuds
     fig.update_layout(
-        title_text=f"Transitions entre classes de DPE ({departement.name} - {departement.code}, N={len(df_epc_evolution)})",
-        font_size=12,
+        title_text=f"Transitions de classes entre DPE successifs ({departement.name} - {departement.code}, N={len(df_epc_evolution)}, écart max. entre DPE = {period} jours)",
+        font_size=30,
+        title_font_size=30,
+        #font_color = 'black', 
+        font_shadow = "auto", # 'None' si pas d'ombre
+        #font_family='Arial Black' # todo: que mettre ?
+        # todo : mettre label a l'exterieur
     )
+    
+    
+    # todo : enregistrer figure (pb avec kaleido)
+    # save_name = f"Transitions de classes entre DPE successifs ({departement.name} - {departement.code}, N={len(df_epc_evolution)}, period = {period} jours).png"
+    # fig.write_image(os.path.join(output_folder_sankey,save_name))
+    # pio.savefig(os.path.join(output_folder_sankey,save_name), bbox_inches='tight')
+
     
     fig.show()
     
@@ -329,7 +361,7 @@ def download_dpe_details(dpe_id, force=False):
     Parameters
     ----------
     dpe_id : str
-        DESCRIPTION.
+        identifiant du dpe.
     force : boolean, optional
         DESCRIPTION. The default is False.
 
@@ -338,11 +370,14 @@ def download_dpe_details(dpe_id, force=False):
     None.
 
     """
-    if '{}.xlsx'.format(dpe_id) in os.listdir(os.path.join('data','DPE','XML')) or force:
+    output_folder_dpe_details = os.path.join('data', 'DPE', 'XML')
+    os.makedirs(output_folder_dpe_details, exist_ok=True)
+    
+    if '{}.xml'.format(dpe_id) in os.listdir(output_folder_dpe_details) or force:
         return
 
-    try:
-        dls = f"https://observatoire-dpe-audit.ademe.fr/pub/dpe/{dpe_id}/xml"
+    else:
+        dls = f"https://observatoire-dpe-audit.ademe.fr/afficher-dpe/{dpe_id}"
         req = Request(dls)
         req.add_header('User-Agent', 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:77.0) Gecko/20100101 Firefox/77.0')
 
@@ -351,8 +386,7 @@ def download_dpe_details(dpe_id, force=False):
         # with open(os.path.join('data','DPE','XLS','{}.xlsx'.format(dpe_id)), 'wb') as output:
         with open(os.path.join('data','DPE','XML','{}.xml'.format(dpe_id)), 'wb') as output:
             output.write(content.read())
-    except HTTPError:
-        return
+
     return
 
 
@@ -375,7 +409,7 @@ def main():
     os.makedirs(output_folder, exist_ok=True)
     
     
-    dep_code = '91'
+    dep_code = '75'
     departement = Departement(dep_code)
     
     
@@ -404,14 +438,16 @@ def main():
 
     
     # graphe de passage heatmap
-    if True:
-        dep_code = '85'
+    if False:        
+        plot_heatmap(dep_code, frequency=True, surface_gap = 1, period = 30)
         
-        plot_heatmap(dep_code, frequency=True)
         
+    # Sankey diagram with Plotly
+    if False: 
+        plotly_sankey(dep_code, 1, 30)
         
     
-    # Sankey diagram
+    # Sankey diagram with pySankey
     if False:
 
         bdnb_df = filter_bdnb_individual(dep_code) # prend du temps je pense
@@ -436,6 +472,10 @@ def main():
         fig.savefig(save_name, bbox_inches="tight", dpi=150)
 
     
+    # Dowload DPE details
+    if True: 
+        download_dpe_details('2375E2119760F')
+
     
     tac = time.time()
     print(f'Done in {tac-tic:.2f}s.')
