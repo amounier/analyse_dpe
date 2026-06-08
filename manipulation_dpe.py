@@ -104,7 +104,7 @@ def filter_bdnb_individual(dep_code, force):
 
 # %%
 
-def filter_manipulated(dep_code, plot_surface_evolution = True, surface_gap = 1, period = 30): # todo: rajouter condition sur surface ?
+def filter_manipulated(dep_code, plot_surface_evolution = True, surface_gap = 1, period = 30, ecart_relatif = True): # todo: rajouter condition sur surface ?
 # todo : exclure DPE identiques fait le meme jour = doublons ? verifier que meme infos détaillées ou pas
     """
     Identification des bâtiments ayant calculés des DPE .
@@ -169,16 +169,41 @@ def filter_manipulated(dep_code, plot_surface_evolution = True, surface_gap = 1,
     # df_epc_evolution = df_epc_evolution.reset_index(drop=True) # pour nettoyer colonne inutile
     
     df_epc_evolution['surface_diff'] =  df_epc_evolution.second_epc_surf - df_epc_evolution.first_epc_surf
+    df_epc_evolution['surface_diff_rel'] =  df_epc_evolution.surface_diff / df_epc_evolution.first_epc_surf *100  # écart relatif par rapport à la première surface déclarée
+
 
     if plot_surface_evolution: 
         fig, ax = plt.subplots(figsize=(5,5), dpi=300)
-        df_epc_evolution.hist(column='surface_diff', ax=ax, bins=300, color='k')
         
-        ax.set_title(f"Evolution des surfaces déclarées entre deux DPE successifs\n({departement.name} - {departement.code}, N={len(df_epc_evolution)})")
-        ax.set_ylabel("Nombre d'observations")
-        ax.set_xlabel("Différence entre les deux surfaces")
+        if ecart_relatif :
+            df_epc_evolution.hist(column='surface_diff_rel', ax=ax, bins=300, color='k')
+            
+            ax.set_title(f"Ecart relatif des surfaces déclarées entre deux DPE successifs\n({departement.name} - {departement.code}, N={len(df_epc_evolution)})") # changer nom figure ?
+            ax.set_ylabel("Nombre d'observations")
+            ax.set_xlabel("Ecart à la 1$^{ère}$ surface, en %")
+            
+            ax.set_xlim([-100,100])
+            
+        else:
+            df_epc_evolution.hist(column='surface_diff', ax=ax, bins=300, color='k')
+            
+            ax.set_title(f"Evolution des surfaces déclarées entre deux DPE successifs\n({departement.name} - {departement.code}, N={len(df_epc_evolution)})")
+            ax.set_ylabel("Nombre d'observations")
+            ax.set_xlabel("Différence entre les deux surfaces")
+            
+            ax.set_xlim([-100,100])
+
         
-        ax.set_xlim([-100,100])
+        # Enregistrement de la figure
+        output_folder_surface = os.path.join('output', 'hist_ecart_surface_entre_DPE_successifs')
+        os.makedirs(output_folder_surface, exist_ok=True)
+        existing_files = os.listdir(output_folder_surface)
+        
+        if ecart_relatif :
+            save_name = f'Ecart_relatif_surface_entre_DPE_successifs_dep{dep_code}.png'
+        else:
+            save_name = f'Ecart_surface_entre_DPE_successifs_dep{dep_code}.png'
+        plt.savefig(os.path.join(output_folder_surface,save_name), bbox_inches='tight')
         
         surface_manip_count_1 = len(df_epc_evolution[df_epc_evolution.surface_diff != 0])
         surface_manip_count_1_percent = surface_manip_count_1 / len(df_epc_evolution) *100
@@ -188,6 +213,7 @@ def filter_manipulated(dep_code, plot_surface_evolution = True, surface_gap = 1,
         surface_manip_count_2_percent = surface_manip_count_2 / len(df_epc_evolution) *100
         print(f'Nombre de modifications de surface supérieures à +-{surface_gap} m2 pour le département {dep_code} :', surface_manip_count_2, f'parmi N={len(df_epc_evolution)} ({surface_manip_count_2_percent:.1f} %)')
 
+       
     
     return df_epc_evolution   
     
@@ -215,11 +241,6 @@ def plot_heatmap(dep_code, frequency, surface_gap = 1, period = 30):
     
     departement = Departement(dep_code)
 
-    # Définition du chemin de sauvegarde des heatmap
-    output_folder_heatmap = os.path.join('output', 'heatmap')
-    os.makedirs(output_folder_heatmap, exist_ok=True)
-    existing_files = os.listdir(output_folder_heatmap)
-    
     df_epc_evolution = filter_manipulated(dep_code, plot_surface_evolution = False, surface_gap = surface_gap, period = period)
     
     
@@ -260,6 +281,12 @@ def plot_heatmap(dep_code, frequency, surface_gap = 1, period = 30):
         spine.set_visible(True)
     ax.set_ylabel('Second EPC')
     ax.set_xlabel('First EPC')
+    
+    
+    # Définition du chemin de sauvegarde des heatmap
+    output_folder_heatmap = os.path.join('output', 'heatmap')
+    os.makedirs(output_folder_heatmap, exist_ok=True)
+    existing_files = os.listdir(output_folder_heatmap)
     
     # Enregistrement de la figure
     save_name = f'DPE_manipulation_classes_{dep_code}.png'
@@ -352,6 +379,8 @@ def plotly_sankey(dep_code, surface_gap, period):
     return
 
 
+# %%
+
 
 
 def download_dpe_details(dpe_id, force=False):
@@ -370,29 +399,74 @@ def download_dpe_details(dpe_id, force=False):
     None.
 
     """
-    output_folder_dpe_details = os.path.join('data', 'DPE', 'XML')
+    output_folder_dpe_details = os.path.join('data', 'DPE', 'JSON')
     os.makedirs(output_folder_dpe_details, exist_ok=True)
     
-    if '{}.xml'.format(dpe_id) in os.listdir(output_folder_dpe_details) or force:
+    if '{}.json'.format(dpe_id) in os.listdir(output_folder_dpe_details) or force:
         return
 
     else:
-        dls = f"https://observatoire-dpe-audit.ademe.fr/afficher-dpe/{dpe_id}"
+        dls = f"https://data.ademe.fr/data-fair/api/v1/datasets/dpe03existant/lines?numero_dpe_eq={dpe_id}" 
         req = Request(dls)
-        req.add_header('User-Agent', 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:77.0) Gecko/20100101 Firefox/77.0')
-
         content = urlopen(req)
 
         # with open(os.path.join('data','DPE','XLS','{}.xlsx'.format(dpe_id)), 'wb') as output:
-        with open(os.path.join('data','DPE','XML','{}.xml'.format(dpe_id)), 'wb') as output:
+        with open(os.path.join('data','DPE','JSON','{}.json'.format(dpe_id)), 'wb') as output:
             output.write(content.read())
-
+            
+            
     return
-
-
-
-
+            
     
+    
+
+
+# ATTENTION : run "pip install jsondiff" dans la console au préalable !
+import jsondiff
+from jsondiff import diff
+import pprint
+
+
+def compare_dpe_details(dep_code):
+    
+    """
+    Based on https://github.com/matteobarzaghi/jsondiff
+    """
+        
+    df_epc_evolution = filter_manipulated(dep_code, plot_surface_evolution = False, surface_gap = 1, period = 30, ecart_relatif = True)
+    
+    download_dpe_details()
+    
+    def convert_keys(obj):
+        """Recursively convert all dict keys to strings."""
+        if isinstance(obj, dict):
+            return {str(k): convert_keys(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [convert_keys(i) for i in obj]
+        else:
+            return obj
+    
+    # Load the JSON files
+    with open('data/DPE/JSON/2591E2430617Y.json') as f1, open('data/DPE/JSON/2591E2430916L.json') as f2:
+        json1 = json.load(f1)
+        json2 = json.load(f2)
+    
+    # Compute the differences using jsondiff
+    differences = diff(json1, json2)
+    
+    # Pretty-print the diff to the console using pprint
+    pp = pprint.PrettyPrinter(indent=2)
+    pp.pprint(differences)
+    
+    # Convert keys to strings for JSON serialization
+    differences_converted = convert_keys(differences)
+    
+    # Save the pretty-printed diff to a file
+    pretty_diff = json.dumps(differences_converted, indent=2)
+    with open("diff_output.txt", "w", encoding="utf-8") as outfile:
+        outfile.write(pretty_diff)
+        
+        
     
 #%% ===========================================================================
 # script principal
@@ -409,7 +483,7 @@ def main():
     os.makedirs(output_folder, exist_ok=True)
     
     
-    dep_code = '75'
+    dep_code = '91'
     departement = Departement(dep_code)
     
     
@@ -474,7 +548,9 @@ def main():
     
     # Dowload DPE details
     if True: 
-        download_dpe_details('2375E2119760F')
+        download_dpe_details('2591E2430916L')
+        # download_dpe_details('2275E2157068C') # 14 brillat savarin
+        
 
     
     tac = time.time()
