@@ -6,12 +6,12 @@ Created on Tue Jun  2 12:23:12 2026
 @author: audrey
 """
 
+# ATTENTION : run "pip install jsondiff" dans la console au préalable !
 
 import time
 import requests
 import io
 import os
-import json
 import geopandas as gpd
 import numpy as np
 import pandas as pd
@@ -35,6 +35,9 @@ import plotly.io as pio
 pio.renderers.default='browser'
 import plotly.graph_objects as go
 from pySankey.sankey import sankey
+import json
+from jsondiff import diff
+import pprint
 
 from utils import etiquette_colors_dict
 from administrative import Departement, France
@@ -107,7 +110,7 @@ def filter_bdnb_individual(dep_code, force):
 def filter_manipulated(dep_code, plot_surface_evolution = True, surface_gap = 1, period = 30, ecart_relatif = True): # todo: rajouter condition sur surface ?
 # todo : exclure DPE identiques fait le meme jour = doublons ? verifier que meme infos détaillées ou pas
     """
-    Identification des bâtiments ayant calculés des DPE .
+    Identification des bâtiments ayant calculés plusieurs DPEs .
     
     Parameters
     ----------
@@ -125,7 +128,7 @@ def filter_manipulated(dep_code, plot_surface_evolution = True, surface_gap = 1,
     df_epc_evolution : pandas DataFrame
         Comparaison entre deux DPEs successifs d'un même bâtiment   
         Colonnes :
-            - batiment_groupe_id : identifiant du batiment
+            - batiment_groupe_id (index) : identifiant du batiment
             - first_epc_id : identifiant du premier DPE calculé
             - first_epc_surf : surface renseignée lors du calcul du 1er DPE
             - first_epc : classe du premier DPE calculé (compris entre ‘A’ et ‘G’)
@@ -404,11 +407,20 @@ def download_dpe_details(dpe_id, force=False):
     
     if '{}.json'.format(dpe_id) in os.listdir(output_folder_dpe_details) or force:
         return
-
+    
+    
     else:
         dls = f"https://data.ademe.fr/data-fair/api/v1/datasets/dpe03existant/lines?numero_dpe_eq={dpe_id}" 
         req = Request(dls)
         content = urlopen(req)
+        
+# =============================================================================
+#         if content.status_code == 429:
+#                 retry_after = int(content.headers.get("Retry-After", 1))
+#                 print(f"Rate limited. Sleeping for {retry_after} seconds...")
+#                 time.sleep(retry_after * (2 ** i))  # exponential backoff
+# =============================================================================
+
 
         # with open(os.path.join('data','DPE','XLS','{}.xlsx'.format(dpe_id)), 'wb') as output:
         with open(os.path.join('data','DPE','JSON','{}.json'.format(dpe_id)), 'wb') as output:
@@ -421,51 +433,120 @@ def download_dpe_details(dpe_id, force=False):
     
 
 
-# ATTENTION : run "pip install jsondiff" dans la console au préalable !
-import jsondiff
-from jsondiff import diff
-import pprint
+def diff_dpe_data(dpe_id1,dpe_id2):
+    """
+    Retourne les différences entre deux DPE successifs (json).
 
+    Parameters
+    ----------
+    dpe_id1 : TYPE
+        DESCRIPTION.
+    dpe_id2 : TYPE
+        DESCRIPTION.
 
-def compare_dpe_details(dep_code):
+    Returns
+    -------
+    json_dpe1 : TYPE
+        DESCRIPTION.
+    json_dpe2 : TYPE
+        DESCRIPTION.
+    dpe_diff : TYPE
+        DESCRIPTION.
+    """
     
-    """
-    Based on https://github.com/matteobarzaghi/jsondiff
-    """
+    # Load the JSON files    
+    with open(os.path.join('data','DPE','JSON','{}.json'.format(dpe_id1)), 'r') as f:
+        json_dpe1 = json.load(f)
+    with open(os.path.join('data','DPE','JSON','{}.json'.format(dpe_id2)), 'r') as f:
+        json_dpe2 = json.load(f)
         
-    df_epc_evolution = filter_manipulated(dep_code, plot_surface_evolution = False, surface_gap = 1, period = 30, ecart_relatif = True)
-    
-    download_dpe_details()
-    
-    def convert_keys(obj):
-        """Recursively convert all dict keys to strings."""
-        if isinstance(obj, dict):
-            return {str(k): convert_keys(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [convert_keys(i) for i in obj]
-        else:
-            return obj
-    
-    # Load the JSON files
-    with open('data/DPE/JSON/2591E2430617Y.json') as f1, open('data/DPE/JSON/2591E2430916L.json') as f2:
-        json1 = json.load(f1)
-        json2 = json.load(f2)
-    
     # Compute the differences using jsondiff
-    differences = diff(json1, json2)
+    dpe_diff = diff(a=json_dpe1, b=json_dpe2)
     
-    # Pretty-print the diff to the console using pprint
-    pp = pprint.PrettyPrinter(indent=2)
-    pp.pprint(differences)
     
-    # Convert keys to strings for JSON serialization
-    differences_converted = convert_keys(differences)
     
-    # Save the pretty-printed diff to a file
-    pretty_diff = json.dumps(differences_converted, indent=2)
-    with open("diff_output.txt", "w", encoding="utf-8") as outfile:
-        outfile.write(pretty_diff)
+# =============================================================================
+# BONUS pretty print,     Based on https://github.com/matteobarzaghi/jsondiff
+
+#     def convert_keys(obj):
+#         """Recursively convert all dict keys to strings."""
+#         if isinstance(obj, dict):
+#             return {str(k): convert_keys(v) for k, v in obj.items()}
+#         elif isinstance(obj, list):
+#             return [convert_keys(i) for i in obj]
+#         else:
+#             return obj
+# 
+#     
+#     # Pretty-print the diff to the console using pprint
+#     pp = pprint.PrettyPrinter(indent=2)
+#     pp.pprint(dpe_diff)
+#     
+#     # Convert keys to strings for JSON serialization
+#     differences_converted = convert_keys(dpe_diff)
+#     
+#     # Save the pretty-printed diff to a file
+#     pretty_diff = json.dumps(differences_converted, indent=2)
+#     with open("diff_output.txt", "w", encoding="utf-8") as outfile:
+#         outfile.write(pretty_diff)
+# =============================================================================
         
+    
+    
+    return json_dpe1, json_dpe2, dpe_diff
+
+
+
+def compare_dpe_data(dpe_id1,dpe_id2):
+    """
+    Création d'un DataFrame pour comparer les variables modifiées entre deux DPE successifs.
+
+    Parameters
+    ----------
+    dpe_id1 : TYPE
+        DESCRIPTION.
+    dpe_id2 : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    TYPE
+        DESCRIPTION.
+    """
+    
+
+    json_dpe1, json_dpe2, dpe_diff = diff_dpe_data(dpe_id1,dpe_id2)
+
+    # Initialisation DataFrame des variables modifiées
+    list_changing_variables = [k for k in dpe_diff['results'][0].keys()] # todo : faire un code plus beau sans dictionnaire de dictionnaire ?
+    df_changing_variables = pd.DataFrame(index = list_changing_variables)
+    
+    # Jointure des détails des DPEs successifs
+    df_dpe1 = pd.DataFrame().from_dict(json_dpe1['results'][0], orient='index', columns =['First DPE'])
+    df_dpe2 = pd.DataFrame().from_dict(json_dpe2['results'][0], orient='index', columns =['Second DPE'])
+
+    comparison_df = df_dpe1.join(df_dpe2)
+    comparison_df = df_changing_variables.join(comparison_df)
+
+    return comparison_df
+
+
+
+
+def delete_dpe_copies(dep_code):
+    
+    # Récupération des DPE successifs effectués LE MEME JOUR (period = 0)
+    df_epc_evolution = filter_manipulated(dep_code, plot_surface_evolution = False, surface_gap = 1, period = 0, ecart_relatif = True)
+    ensemble_dpe = set(pd.concat([df_epc_evolution["first_epc_id"], df_epc_evolution["second_epc_id"]]))    
+    
+    for dpe_id in ensemble_dpe : 
+        download_dpe_details(dpe_id)
+        time.sleep(1)   # 0.3s par dpe_id environ --> 200 req/min et 600 requêtes/min max
+        # pas sûre que ça regle le pb
+        
+    _, _, dpe_diff = diff_dpe_data()
+    
+    if dpe_diff['results'][0] est vide
         
     
 #%% ===========================================================================
@@ -548,7 +629,7 @@ def main():
     
     # Dowload DPE details
     if True: 
-        download_dpe_details('2591E2430916L')
+        download_dpe_details('2591E2079598F')
         # download_dpe_details('2275E2157068C') # 14 brillat savarin
         
 
