@@ -499,7 +499,7 @@ def diff_dpe_data(dpe_id1,dpe_id2):
 
 def compare_dpe_data(dpe_id1,dpe_id2):
     """
-    Création d'un DataFrame pour comparer les variables modifiées entre deux DPE successifs.
+    Création d'un DataFrame pour comparer les variables modifiées entre deux DPE successifs. 
 
     Parameters
     ----------
@@ -516,6 +516,10 @@ def compare_dpe_data(dpe_id1,dpe_id2):
     
 
     json_dpe1, json_dpe2, dpe_diff = diff_dpe_data(dpe_id1,dpe_id2)
+    
+    if dpe_diff['results'] == []:
+        print('Les deux DPE sont exactement identiques.')
+        return 
 
     # Initialisation DataFrame des variables modifiées
     list_changing_variables = [k for k in dpe_diff['results'][0].keys()] # todo : faire un code plus beau sans dictionnaire de dictionnaire ?
@@ -527,26 +531,57 @@ def compare_dpe_data(dpe_id1,dpe_id2):
 
     comparison_df = df_dpe1.join(df_dpe2)
     comparison_df = df_changing_variables.join(comparison_df)
+    
+    print(comparison_df)
 
-    return comparison_df
+    return 
 
 
 
 
 def delete_dpe_copies(dep_code):
+    """
+    SUMMARY.
+
+    Parameters
+    ----------
+    dep_code : str
+        code du departement.
+
+    Returns
+    -------
+    df_epc_evolution : pandas DataFrame
+        DataFrame des paires de DPEs successifs avec ajout d'une colonne "dpe_diff" listant les champs modifiés.
+    """
     
     # Récupération des DPE successifs effectués LE MEME JOUR (period = 0)
     df_epc_evolution = filter_manipulated(dep_code, plot_surface_evolution = False, surface_gap = 1, period = 0, ecart_relatif = True)
-    ensemble_dpe = set(pd.concat([df_epc_evolution["first_epc_id"], df_epc_evolution["second_epc_id"]]))    
     
+    # Téléchargement de tous les fichiers json nécessaires au calcul dpe_diff
+    ensemble_dpe = set(pd.concat([df_epc_evolution["first_epc_id"], df_epc_evolution["second_epc_id"]]))    
     for dpe_id in ensemble_dpe : 
         download_dpe_details(dpe_id)
         time.sleep(1)   # 0.3s par dpe_id environ --> 200 req/min et 600 requêtes/min max
         # pas sûre que ça regle le pb
-        
-    _, _, dpe_diff = diff_dpe_data()
     
-    if dpe_diff['results'][0] est vide
+    # Création colonne "dpe_diff" listant les champs modifiés entre les deux DPE successifs
+    liste_dpe_diff = []
+    for index, row in df_epc_evolution.iterrows() :
+        dpe_id1 = row["first_epc_id"]
+        dpe_id2 = row["second_epc_id"]
+        _, _, dpe_diff = diff_dpe_data(dpe_id1, dpe_id2)
+        
+        if dpe_diff['results'] == [] : 
+            df_epc_evolution.drop(labels=index, inplace = True) # on supprime les DPE pour lesquels le json est vide
+        else:
+            liste_dpe_diff_ligne = [k for k in dpe_diff['results'][0].keys()]
+            liste_dpe_diff.append(liste_dpe_diff_ligne) # liste des champs modifiés entre les deux DPEs
+
+    df_epc_evolution["dpe_diff"] = liste_dpe_diff
+
+    
+    return df_epc_evolution
+
         
     
 #%% ===========================================================================
