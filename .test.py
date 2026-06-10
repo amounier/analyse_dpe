@@ -75,8 +75,10 @@ def download_dpe_details_selenium(dpe_id, force=False, timeout = 20):
         # téléchargement du fichier xml
         ChromeDriverManager().install()
         options = webdriver.ChromeOptions() # https://peter.sh/experiments/cgeadhromium-command-line-switches/ 
-        # options.add_argument("--incognito")
+        # options.binary_location = driver_path
+
         driver = webdriver.Chrome(options=options)
+
         driver.get("https://observatoire-dpe-audit.ademe.fr/accueil")
         wait = WebDriverWait(driver,timeout)
         
@@ -190,7 +192,7 @@ def main():
     
     # print(compare_dpe_data(dpe_id2, dpe_id1)) 
     
-    print('Réussite :', download_dpe_details_selenium(dpe_id1,force=False,timeout=20))
+    print('Réussite :', download_dpe_details_selenium(dpe_id1,force=True,timeout=20))
     
     
     tac = time.time()
