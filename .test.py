@@ -73,9 +73,8 @@ def download_dpe_details_selenium(dpe_id, force=False, timeout = 20):
         success = False
         
         # téléchargement du fichier xml
-        ChromeDriverManager().install()
+        _ = ChromeDriverManager().install()
         options = webdriver.ChromeOptions() # https://peter.sh/experiments/cgeadhromium-command-line-switches/ 
-        # options.binary_location = driver_path
 
         driver = webdriver.Chrome(options=options)
 
