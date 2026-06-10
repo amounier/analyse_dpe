@@ -1,6 +1,7 @@
 output/
 data/BDNB/
 data/DPE/JSON/
+data/DPE/XML/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

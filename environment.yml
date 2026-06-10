@@ -33,3 +33,4 @@ dependencies:
   - utm
   - sqlite
   - jsondiff
+  - selenium
