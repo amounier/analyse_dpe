@@ -18,6 +18,7 @@ from selenium.common import NoSuchElementException, TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.wait import WebDriverWait
+from webdriver_manager.chrome import ChromeDriverManager
 
 # def download_dpe_details_requests(dpe_id, force=False):
 #     """
@@ -72,6 +73,7 @@ def download_dpe_details_selenium(dpe_id, force=False, timeout = 20):
         success = False
         
         # téléchargement du fichier xml
+        ChromeDriverManager().install()
         options = webdriver.ChromeOptions() # https://peter.sh/experiments/cgeadhromium-command-line-switches/ 
         # options.add_argument("--incognito")
         driver = webdriver.Chrome(options=options)
@@ -179,11 +181,11 @@ def main():
     tic = time.time()
     
     dpe_id1 = '2375E2162413S'
-    dpe_id1 = '2275E2882995J'
+    # dpe_id1 = '2275E2882995J'
     # download_dpe_details(dpe_id1)
     
-    # dpe_id2 = '2375E2258099Y'
-    # dpe_id2 = '2275E2946357J'
+    dpe_id1 = '2375E2258099Y'
+    dpe_id1 = '2275E2946357J'
     # download_dpe_details(dpe_id2)
     
     # print(compare_dpe_data(dpe_id2, dpe_id1)) 
