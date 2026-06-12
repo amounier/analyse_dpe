@@ -305,6 +305,8 @@ def main():
         # bat_groupe_id = 'bdnb-bg-BUZK-W1C9-14P3' # 704 logements
         # bat_groupe_id = 'bdnb-bg-129J-JTEH-Z4XN' # bat sans adresse
         bat_groupe_id = 'bdnb-bg-37BE-BE89-5NR5'
+        bat_groupe_id = 'bdnb-bg-18GG-5GGC-X6NX'
+        bat_groupe_id = 'bdnb-bg-BAXJ-K72M-U8CT'
 
         
         neighbourhood_map(bat_groupe_id, output_folder)
