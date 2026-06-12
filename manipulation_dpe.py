@@ -6,7 +6,7 @@ Created on Tue Jun  2 12:23:12 2026
 @author: audrey
 """
 
-# ATTENTION : run "pip install jsondiff" dans la console au préalable !
+# ATTENTION : run "pip install jsondiff" et "pip install selenium" dans la console au préalable !
 
 import time
 import requests
@@ -65,7 +65,7 @@ def filter_bdnb_individual(dep_code, force):
     os.makedirs(output_folder, exist_ok=True)
     existing_files = os.listdir(output_folder)
     
-    # Définition du nom du fichier final
+    # Définsankeyition du nom du fichier final
     save_name = f'bdnb_filter_individual_dep{dep_code}'
     
     if save_name not in existing_files or force:
@@ -188,7 +188,7 @@ def filter_manipulated(dep_code, plot_surface_evolution = True, surface_gap = 1,
             ax.set_xlim([-100,100])
             
         else:
-            df_epc_evolution.hist(column='surface_diff', ax=ax, bins=300, color='k')
+            df_epc_evolution.hist(column='surface_diff', ax=ax, bins=np.linspace(), color='k') # todo : mettre liste de valeur avec sequence, eventuellement utiliser seaborn
             
             ax.set_title(f"Evolution des surfaces déclarées entre deux DPE successifs\n({departement.name} - {departement.code}, N={len(df_epc_evolution)})")
             ax.set_ylabel("Nombre d'observations")
@@ -243,9 +243,12 @@ def plot_heatmap(dep_code, frequency, surface_gap = 1, period = 30):
     """
     
     departement = Departement(dep_code)
-
+    
+    # Version rapide non nettoyée
     df_epc_evolution = filter_manipulated(dep_code, plot_surface_evolution = False, surface_gap = surface_gap, period = period)
     
+    # Version nettoyée des DPEs en double : (beaucoup plus long car il faut télécharger tous les json) et ne change pas grand chose
+    # df_epc_evolution = delete_dpe_copies(dep_code, plot_surface_evolution = False, surface_gap = surface_gap, period = period)
     
     # Décompte de la fréquence des transitions avec crosstab()
     df_heatmap = pd.crosstab(
@@ -277,7 +280,7 @@ def plot_heatmap(dep_code, frequency, surface_gap = 1, period = 30):
     else:
         ax = sns.heatmap(df_heatmap, ax=ax, annot=annot, fmt="", cmap='bone_r', cbar_ax=cbar_ax,cbar=True,cbar_kws={'label':"Nombre d'observations"})
     
-    ax.set_title(f'{departement.name} - {departement.code}, N={len(df_epc_evolution)}')
+    ax.set_title(f'Modification des DPE sur une période de {period} jours\n{departement.name} - {departement.code}, N={len(df_epc_evolution)}')
     for spine in ax.spines.values():
         spine.set_visible(True)
     for spine in cbar_ax.spines.values():
@@ -292,7 +295,7 @@ def plot_heatmap(dep_code, frequency, surface_gap = 1, period = 30):
     existing_files = os.listdir(output_folder_heatmap)
     
     # Enregistrement de la figure
-    save_name = f'DPE_manipulation_classes_{dep_code}.png'
+    save_name = f'DPE_manipulation_classes_{dep_code}_sur_{period}_jours.png'
     if frequency:
         save_name = save_name.replace('.png','_frequency.png')
 
@@ -321,7 +324,7 @@ def plotly_sankey(dep_code, surface_gap, period):
     os.makedirs(output_folder_sankey, exist_ok=True)
     
     df_epc_evolution = filter_manipulated(dep_code, plot_surface_evolution = False, surface_gap = surface_gap, period = period)
-
+    # todo : rajouter ici un delete_dpe_copies ?
         
     # Décompte des transitions entre chaque paire de classes DPE
     transition_counts = df_epc_evolution.groupby(['first_epc', 'second_epc']).size().reset_index(name='count')
@@ -385,17 +388,83 @@ def plotly_sankey(dep_code, surface_gap, period):
 # %%
 
 
+# Définition des champs à ne pas prendre en compte car non manipulable directement par les diagnostiqueurs pour influencer les calculs
+set_to_not_consider = {'numero_dpe',
+                       '_rand',
+                       '_i',
+                       '_id',
+                       # Bilan DPE
+                       'etiquette_dpe',
+                       'etiquette_ges',
+                       # Localisation
+                       'adresse_ban',
+                       'numero_voie_ban',
+                       'nom_rue_ban',
+                       'nom_commune_ban',
+                       'code_postal_ban',
+                       'code_insee_ban',
+                       'code_departement_ban',
+                       'code_region_ban',
+                       'identifiant_ban',
+                       'coordonnee_cartographique_x_ban',
+                       'coordonnee_cartographique_y_ban',
+                       'score_ban',
+                       'statut_geocodage',
+                       'adresse_brut',
+                       'adresse_complete_brut',
+                       'nom_commune_brut',
+                       'code_postal_brut',
+                       'numero_etage_appartement',
+                       'position_logement_dans_immeuble',
+                       'nom_residence',
+                       'complement_adresse_batiment',
+                       'complement_adresse_logement',
+                       # Consommation en énergie primaire
+                       'conso_5_usages_ep',
+                       'conso_5_usages_par_m2_ep',
+                       'conso_chauffage_ep',
+                       'conso_ecs_ep',
+                       'conso_refroidissement_ep',
+                       'conso_eclairage_ep',
+                       'conso_auxiliaires_ep',
+                       # Consommation en énergie finale
+                       'conso_5_usages_ef',
+                       'conso_5_usages_par_m2_ef',
+                       'conso_chauffage_ef',
+                       'conso_ecs_ef',
+                       'conso_refroidissement_ef',
+                       'conso_eclairage_ef',
+                       'conso_auxiliaires_ef',
+                       # Emissions de GES
+                       'emission_ges_5_usages',
+                       'emission_ges_5_usages_par_m2',
+                       'emission_ges_chauffage',
+                       'emission_ges_ecs',
+                       'emission_ges_refroidissement',
+                       'emission_ges_eclairage',
+                       'emission_ges_auxiliaires',
+                       # Coûts
+                       'cout_total_5_usages',
+                       'cout_chauffage',
+                       'cout_ecs',
+                       'cout_refroidissement',
+                       'cout_eclairage',
+                       'cout_auxiliaires'
+                       }
+
+
+
 
 def download_dpe_details(dpe_id, force=False):
     """
-    Téléchargement des fichiers de sorties des DPE (au format XML)
+    Téléchargement des fichiers de sorties des DPE (au format json)
 
     Parameters
     ----------
     dpe_id : str
         identifiant du dpe.
     force : boolean, optional
-        DESCRIPTION. The default is False.
+        force le re-téléchargement du .json. The default is False.
 
     Returns
     -------
@@ -426,8 +495,7 @@ def download_dpe_details(dpe_id, force=False):
         with open(os.path.join('data','DPE','JSON','{}.json'.format(dpe_id)), 'wb') as output:
             output.write(content.read())
             
-            
-    return
+            # todo : rajouter ici le fait de nettoyer les json ? et de supprimer les json vide ?
             
     
     
@@ -435,7 +503,7 @@ def download_dpe_details(dpe_id, force=False):
 
 def diff_dpe_data(dpe_id1,dpe_id2):
     """
-    Retourne les différences entre deux DPE successifs (json).
+    Retourne les différences entre deux DPE successifs (json) à l'aide de jsondiff.
 
     Parameters
     ----------
@@ -499,7 +567,7 @@ def diff_dpe_data(dpe_id1,dpe_id2):
 
 def compare_dpe_data(dpe_id1,dpe_id2):
     """
-    Création d'un DataFrame pour comparer les variables modifiées entre deux DPE successifs. 
+    Création d'un DataFrame pour comparer les variables modifiées entre deux DPEs successifs. Ne tient pas compte des variables finales issues de calculs (conso_5_usages etc)
 
     Parameters
     ----------
@@ -521,27 +589,34 @@ def compare_dpe_data(dpe_id1,dpe_id2):
         print('Les deux DPE sont exactement identiques.')
         return 
 
-    # Initialisation DataFrame des variables modifiées
+    
+
+    # Initialisation DataFrame des variables modifiées # todo : enlever set_to_not_consider
     list_changing_variables = [k for k in dpe_diff['results'][0].keys()] # todo : faire un code plus beau sans dictionnaire de dictionnaire ?
+    for variable in set_to_not_consider:
+        if variable in list_changing_variables:
+            list_changing_variables.remove(variable)
+        else:
+            print(variable)
+    
     df_changing_variables = pd.DataFrame(index = list_changing_variables)
     
     # Jointure des détails des DPEs successifs
     df_dpe1 = pd.DataFrame().from_dict(json_dpe1['results'][0], orient='index', columns =['First DPE'])
     df_dpe2 = pd.DataFrame().from_dict(json_dpe2['results'][0], orient='index', columns =['Second DPE'])
 
-    comparison_df = df_dpe1.join(df_dpe2)
+    comparison_df = df_dpe1.join(df_dpe2, how='outer') # on conserve tous les champs, y compris ceux qui ne sont renseignés que dans un seul des deux df
     comparison_df = df_changing_variables.join(comparison_df)
     
     print(comparison_df)
 
-    return 
+    return comparison_df
 
 
 
-
-def delete_dpe_copies(dep_code):
+def delete_dpe_copies(dep_code, surface_gap, period): # todo : prendre plutot df_epc_evolution en argument ? changer le nom
     """
-    SUMMARY.
+    Nettoie df_epc_evolution en enlevant les DPEs successifs qui sont en réalité identiques.
 
     Parameters
     ----------
@@ -554,15 +629,19 @@ def delete_dpe_copies(dep_code):
         DataFrame des paires de DPEs successifs avec ajout d'une colonne "dpe_diff" listant les champs modifiés.
     """
     
-    # Récupération des DPE successifs effectués LE MEME JOUR (period = 0)
-    df_epc_evolution = filter_manipulated(dep_code, plot_surface_evolution = False, surface_gap = 1, period = 0, ecart_relatif = True)
+    # Récupération des DPE successifs effectués LE MEME JOUR (period = 0) #todo modifier ce commentaire
+    df_epc_evolution = filter_manipulated(dep_code, plot_surface_evolution= False, surface_gap = surface_gap, period = period, ecart_relatif = True)
     
     # Téléchargement de tous les fichiers json nécessaires au calcul dpe_diff
+    output_folder_dpe_details = os.path.join('data', 'DPE', 'JSON')
+    os.makedirs(output_folder_dpe_details, exist_ok=True)
+    
     ensemble_dpe = set(pd.concat([df_epc_evolution["first_epc_id"], df_epc_evolution["second_epc_id"]]))    
-    for dpe_id in ensemble_dpe : 
-        download_dpe_details(dpe_id)
-        time.sleep(1)   # 0.3s par dpe_id environ --> 200 req/min et 600 requêtes/min max
-        # pas sûre que ça regle le pb
+    for dpe_id in ensemble_dpe :       
+        if '{}.json'.format(dpe_id) not in os.listdir(output_folder_dpe_details):
+            download_dpe_details(dpe_id)
+            time.sleep(0.1)   # 0.3s par dpe_id environ --> 200 req/min et 600 requêtes/min max
+            # pas sûre que ça regle le pb, en tout cas c'est lent car si environ 3000 DPE, ça prend 5 min de time.sleep !
     
     # Création colonne "dpe_diff" listant les champs modifiés entre les deux DPE successifs
     liste_dpe_diff = []
@@ -571,18 +650,94 @@ def delete_dpe_copies(dep_code):
         dpe_id2 = row["second_epc_id"]
         _, _, dpe_diff = diff_dpe_data(dpe_id1, dpe_id2)
         
+        # Suppression des DPE pour lesquels un des json est vide
         if dpe_diff['results'] == [] : 
-            df_epc_evolution.drop(labels=index, inplace = True) # on supprime les DPE pour lesquels le json est vide
+            df_epc_evolution.drop(labels=index, inplace = True) 
         else:
             liste_dpe_diff_ligne = [k for k in dpe_diff['results'][0].keys()]
-            liste_dpe_diff.append(liste_dpe_diff_ligne) # liste des champs modifiés entre les deux DPEs
+            # Suppression des DPE dont les différences ne sont pas liées à des manipulations 
+            for variable in set_to_not_consider:
+                if variable in liste_dpe_diff_ligne:
+                    liste_dpe_diff_ligne.remove(variable)
+            if liste_dpe_diff_ligne == []:
+                df_epc_evolution.drop(labels=index, inplace = True)
+            else:
+                liste_dpe_diff.append(liste_dpe_diff_ligne) # liste des champs modifiés entre les deux DPEs
 
-    df_epc_evolution["dpe_diff"] = liste_dpe_diff
+                        
+# =============================================================================
+#             # Suppression des DPE dont les différences ne sont pas liées à des manipulations 
+#             if set(liste_dpe_diff_ligne).issubset({'_rand' etc...}): # test inclusion d'ensembles de champs
+#             # to do : parcourir toute la colonne et supprimer les elements des listes
+#                 df_epc_evolution.drop(labels=index, inplace = True) # on supprime les DPE identiques 
+#             else:
+#                 liste_dpe_diff.append(liste_dpe_diff_ligne) # liste des champs modifiés entre les deux DPEs
+# =============================================================================
+
+    df_epc_evolution["dpe_diff"] = liste_dpe_diff # todo : pas top de faire ça car on est pas sûr que la ligne corresponde bien a l'index ? ce serait mieux de manipuler les df directement
 
     
     return df_epc_evolution
 
-        
+
+
+def hist_champs_modifies(dep_code, surface_gap, period, filter_dpe = None, top_n = 20):
+    
+    departement = Departement(dep_code)
+    df_epc_evolution = delete_dpe_copies(dep_code, surface_gap = surface_gap, period = period)
+    
+    # Filtrage des DPEs qui sont passés dans une meilleure classe ou inversement
+    if filter_dpe == 'better_dpe_only':
+        df_epc_evolution = df_epc_evolution[df_epc_evolution.second_epc < df_epc_evolution.first_epc]
+    elif filter_dpe == 'worse_dpe_only':
+        df_epc_evolution = df_epc_evolution[df_epc_evolution.second_epc > df_epc_evolution.first_epc]
+    
+    # Dépliage de la colonne de listes en autant de lignes qu'il y a d'éléments par liste
+    df_exploded = df_epc_evolution.explode('dpe_diff')
+
+    # Décompte des occurrences de chaque champ
+    counts = df_exploded['dpe_diff'].value_counts()
+    list_do_not_consider = ['_rand', 'numero_dpe', '_i', '_id']  # idem, très manuel comme manière de faire...  # todo : garder seulement les champs renseigné par diagnostiqueur
+    counts.drop(index = list_do_not_consider, inplace = True)
+
+    counts_norm = counts / len(df_epc_evolution) *100 # en % du nb de paires de DPE successifs 
+       
+    
+    # Tracé histogramme (bar chart) des {top_n} champs les plus fréquemment modifiés
+    fig,ax = plt.subplots(figsize=(10, 8))                  
+    counts_norm.head(top_n).plot(kind='barh')
+    if filter_dpe == 'better_dpe_only': # todo: changer titre car pas convaincue
+        fig.suptitle(f'Champs les plus modifiés entre deux DPE successifs améliorés de moins de {period} jours\n{departement.name} - {departement.code}, N={len(df_epc_evolution)}') #, fontsize=10)
+    elif filter_dpe == 'worse_dpe_only': # todo: changer titre car pas convaincue
+        fig.suptitle(f'Champs les plus modifiés entre deux DPE successifs empirés de moins de {period} jours\n{departement.name} - {departement.code}, N={len(df_epc_evolution)}') #, fontsize=10)
+    else :   
+        fig.suptitle(f'Champs les plus modifiés entre deux DPE successifs de moins de {period} jours\n{departement.name} - {departement.code}, N={len(df_epc_evolution)}') #, fontsize=10)
+    ax.set_xlabel("Nombre d'occurrences (%)")
+    ax.set_ylabel(None)
+    for container in ax.containers:
+        ax.bar_label(container, fmt= "%.1f", padding = 1)
+    plt.tight_layout()
+    
+    
+    # Définition du chemin de sauvegarde des histogrammes des champs modifiés
+    output_folder_ACM = os.path.join('output', 'analyse_champs_modifies')
+    os.makedirs(output_folder_ACM, exist_ok=True)
+    existing_files = os.listdir(output_folder_ACM)
+    
+    # Enregistrement de la figure
+    save_name = f'Hist_champs_modifies_sur_{period}_jours_dep_{dep_code}.png'
+    if filter_dpe == 'better_dpe_only':
+        save_name = save_name.replace('.png','_better_dpe_only.png')
+    elif filter_dpe == 'worse_dpe_only':
+        save_name = save_name.replace('.png','_worse_dpe_only.png')
+
+    plt.savefig(os.path.join(output_folder_ACM,save_name), bbox_inches='tight')
+    
+    
+    plt.show()
+    
+    return
+    
     
 #%% ===========================================================================
 # script principal
@@ -601,6 +756,10 @@ def main():
     
     dep_code = '91'
     departement = Departement(dep_code)
+    
+    surface_gap = 1 # m2 
+    period = 30 # jours d'écart maximal entre deux DPE successifs
+    top_n = 20 # nombre de champs affichés sur l'histogramme des champs modifiés
     
     
     # test "type_batiment_dpe” = maison MAIS “nb_log”=!1 
@@ -629,7 +788,7 @@ def main():
     
     # graphe de passage heatmap
     if False:        
-        plot_heatmap(dep_code, frequency=True, surface_gap = 1, period = 30)
+        plot_heatmap(dep_code, frequency=True, surface_gap = 1, period = 40)
         
         
     # Sankey diagram with Plotly
@@ -663,10 +822,16 @@ def main():
 
     
     # Dowload DPE details
-    if True: 
+    if False: 
         download_dpe_details('2591E2079598F')
         # download_dpe_details('2275E2157068C') # 14 brillat savarin
         
+        
+    # analyse des champs modifiés
+    if True:  
+        delete_dpe_copies_paris = delete_dpe_copies('75', 1, 30)
+        #hist_champs_modifies(dep_code, surface_gap = surface_gap, period = period, top_n = top_n)
+
 
     
     tac = time.time()
