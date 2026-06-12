@@ -64,7 +64,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 
 
-def download_dpe_details_selenium(dpe_id, force=False, timeout = 20):
+def download_dpe_details_selenium(dpe_id, force=False, timeout = 20, sleep_time=0.5):
     destination_folder = os.path.join(os.getcwd(),'data', 'DPE', 'XML')
     os.makedirs(destination_folder, exist_ok=True)
     success = True
@@ -73,65 +73,68 @@ def download_dpe_details_selenium(dpe_id, force=False, timeout = 20):
         success = False
         
         # téléchargement du fichier xml
-        ChromeDriverManager().install()
-        options = webdriver.ChromeOptions() # https://peter.sh/experiments/cgeadhromium-command-line-switches/ 
-        # options.binary_location = driver_path
-
-        driver = webdriver.Chrome(options=options)
-
-        driver.get("https://observatoire-dpe-audit.ademe.fr/accueil")
-        wait = WebDriverWait(driver,timeout)
-        
-        selector_cookies = '#tarteaucitronAllDenied2'
-        wait.until(lambda driver: driver.find_element(by=By.CSS_SELECTOR, value=selector_cookies))
-        driver.find_element(by=By.CSS_SELECTOR, value=selector_cookies).click()
-        
-        time.sleep(0.3)
-        
-        selector_dpe = '#bienvenue > div > div.actions-widgets > app-widget-trouver-dpe > div.search-dpe > form > app-input-text-clearable > div > input'
-        wait.until(lambda driver: driver.find_element(by=By.CSS_SELECTOR, value=selector_dpe))
-        driver.find_element(by=By.CSS_SELECTOR, value=selector_dpe).send_keys(dpe_id+Keys.ENTER)
-        
-        time.sleep(0.3)
-        
-        selector_download = '#dd-dl-detail-dpe'
-        wait.until(lambda driver: driver.find_element(by=By.CSS_SELECTOR, value=selector_download))
-        driver.find_element(by=By.CSS_SELECTOR, value=selector_download).click()
-        
-        time.sleep(0.3)
-        
-        selector_xml = 'body > app-root > main > app-page-public-detail-dpe > app-detail-dpe > app-panel > div.header > div.header-right > app-dropdown > div > div > button:nth-child(2)'
-        wait.until(lambda driver: driver.find_element(by=By.CSS_SELECTOR, value=selector_xml))
-        driver.find_element(by=By.CSS_SELECTOR, value=selector_xml).click()
-        
-        # récupération du nom du dossier téléchargement
-        result = subprocess.run(
-            ["xdg-user-dir", "DOWNLOAD"],
-            capture_output=True, text=True
-        )
-        download_folder = result.stdout.strip()
-        
-        time.sleep(1)
-        
-        if f'{dpe_id}.xml' in os.listdir(download_folder):
-            success = True
-            driver.quit()
-        
-        if not success:
-            selector_error = 'body > ngb-modal-window > div > div > app-modal-error > app-modal-base > div.modal-footer > app-action-link > button'
-            try: 
-                wait.until(lambda driver: driver.find_element(by=By.CSS_SELECTOR, value=selector_error))
-                driver.find_element(by=By.CSS_SELECTOR, value=selector_error).click()
+        try:
+            _ = ChromeDriverManager().install()
+            options = webdriver.ChromeOptions() # https://peter.sh/experiments/cgeadhromium-command-line-switches/ 
+    
+            driver = webdriver.Chrome(options=options)
+    
+            driver.get("https://observatoire-dpe-audit.ademe.fr/accueil")
+            wait = WebDriverWait(driver,timeout)
+            
+            selector_cookies = '#tarteaucitronAllDenied2'
+            wait.until(lambda driver: driver.find_element(by=By.CSS_SELECTOR, value=selector_cookies))
+            driver.find_element(by=By.CSS_SELECTOR, value=selector_cookies).click()
+            
+            time.sleep(sleep_time)
+            
+            selector_dpe = '#bienvenue > div > div.actions-widgets > app-widget-trouver-dpe > div.search-dpe > form > app-input-text-clearable > div > input'
+            wait.until(lambda driver: driver.find_element(by=By.CSS_SELECTOR, value=selector_dpe))
+            driver.find_element(by=By.CSS_SELECTOR, value=selector_dpe).send_keys(dpe_id+Keys.ENTER)
+            
+            time.sleep(sleep_time)
+            
+            selector_download = '#dd-dl-detail-dpe'
+            wait.until(lambda driver: driver.find_element(by=By.CSS_SELECTOR, value=selector_download))
+            driver.find_element(by=By.CSS_SELECTOR, value=selector_download).click()
+            
+            time.sleep(sleep_time)
+            
+            selector_xml = 'body > app-root > main > app-page-public-detail-dpe > app-detail-dpe > app-panel > div.header > div.header-right > app-dropdown > div > div > button:nth-child(2)'
+            wait.until(lambda driver: driver.find_element(by=By.CSS_SELECTOR, value=selector_xml))
+            driver.find_element(by=By.CSS_SELECTOR, value=selector_xml).click()
+            
+            # récupération du nom du dossier téléchargement
+            result = subprocess.run(
+                ["xdg-user-dir", "DOWNLOAD"],
+                capture_output=True, text=True
+            )
+            download_folder = result.stdout.strip()
+            
+            time.sleep(sleep_time*3)
+            
+            if f'{dpe_id}.xml' in os.listdir(download_folder):
+                success = True
                 driver.quit()
-            except (NoSuchElementException, TimeoutException):
-                if f'{dpe_id}.xml' in os.listdir(download_folder):
-                    success = True
-                driver.quit()
-        
-        # déplacement du fichier téléchargé
-        if success:
-            origin_path = os.path.join(download_folder,f'{dpe_id}.xml')
-            subprocess.call(f"mv {origin_path} {destination_folder}", shell=True)
+            
+            if not success:
+                selector_error = 'body > ngb-modal-window > div > div > app-modal-error > app-modal-base > div.modal-footer > app-action-link > button'
+                try: 
+                    wait.until(lambda driver: driver.find_element(by=By.CSS_SELECTOR, value=selector_error))
+                    driver.find_element(by=By.CSS_SELECTOR, value=selector_error).click()
+                    driver.quit()
+                except (NoSuchElementException, TimeoutException):
+                    if f'{dpe_id}.xml' in os.listdir(download_folder):
+                        success = True
+                    driver.quit()
+            
+            # déplacement du fichier téléchargé
+            if success:
+                origin_path = os.path.join(download_folder,f'{dpe_id}.xml')
+                subprocess.call(f"mv {origin_path} {destination_folder}", shell=True)
+                
+        except TimeoutException:
+            success = False
         
     return success
 
@@ -191,8 +194,15 @@ def main():
     # download_dpe_details(dpe_id2)
     
     # print(compare_dpe_data(dpe_id2, dpe_id1)) 
+    success = False
+    nb_try = 0
+    while not success:
+        success = download_dpe_details_selenium(dpe_id1,force=True,timeout=20)
+        nb_try += 1
+        print(nb_try)
     
-    print('Réussite :', download_dpe_details_selenium(dpe_id1,force=True,timeout=20))
+
+    # print('Réussite :', success)
     
     
     tac = time.time()
