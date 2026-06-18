@@ -48,12 +48,14 @@ from download import get_bdnb, draw_local_map, neighbourhood_map, get_batiment_g
 
 def filter_bdnb_individual(dep_code, force):
     """
-    Filtrage des DPE 2021 3CL associés à des logements individuels (maisons).
+    Filtrage des DPE 2021 3CL associés à des logements individuels (maisons) et enregistrement en .csv pour ne pas avoir à compute à chaque fois. 
 
     Parameters
     ----------
     dep_code : str
         code du departement.
+    force : boolean
+        force le compute et le ré-enregistrement en .csv
 
     Returns
     -------
@@ -255,9 +257,9 @@ def variable_diff(dep_code, df_epc_evolution, variable = 'surface',  plot_variab
     return df_epc_evolution
 
 
-def plot_gain_period(dep_code, period):
+def plot_gain_period(dep_code, period_max=120, bins_size = 5):
     
-    df_epc_evolution = filter_manipulated(dep_code, period)
+    df_epc_evolution = filter_manipulated(dep_code, period_max)
     df_epc_evolution['ecart_date'] = pd.to_datetime(df_epc_evolution.second_epc_date) - pd.to_datetime(df_epc_evolution.first_epc_date)
     df_epc_evolution['ecart_date'] = df_epc_evolution['ecart_date'].dt.days
     # Calcul du gain moyen d'étiquette sur l'ensemble des paires de DPEs successifs
@@ -273,23 +275,34 @@ def plot_gain_period(dep_code, period):
     # df_epc_evolution.hist(column='ecart_date', ax=ax, bins=bins_sequence, color='k')
     # df_epc_evolution.hist(column='ecart_date', ax=ax, bins=20, color='k') # autre version
 
-
-    df_gain_moyen = df_epc_evolution.groupby(['ecart_date'])['gain_etiquette'].mean()
-
-    # Tracé du gain moyen d'étiquette sur périodes de temps
-    period_list = list(range(0,120,5))
-    gain_moyen_etiquette = []
-    #for period in tqdm.tqdm(period_list[:-1]):
-    for i in range(0,23):
-        borne_inf = period_list[i]
-        borne_sup= period_list[i+1]
-        gain_moyen_sur_cette_periode = df_epc_evolution[(df_epc_evolution.ecart_date > borne_inf) & (df_epc_evolution.ecart_date < borne_sup)]['gain_etiquette'].mean()
-        gain_moyen_etiquette.append(gain_moyen_sur_cette_periode)
-
-
+    # Tracé du gain moyen d'étiquette en fonction de l'écart entre les deux DPE successifs 
+    #df_gain_moyen = df_epc_evolution.groupby(['ecart_date'])['gain_etiquette'].mean() # moyenne sans grouper par périodes
+    
+    # Tracé du gain moyen d'étiquette en fonction de la période d'écart entre les deux DPE successifs 
+    df_epc_evolution['bins_ecart_date'] = pd.cut(df_epc_evolution.ecart_date, list(range(0, period_max+1, bins_size)), include_lowest=True)    
+    df_gain_moyen_bins = df_epc_evolution.groupby(['bins_ecart_date'])['gain_etiquette'].mean()
+        
     fig,ax = plt.subplots(figsize=(5,5), dpi=300)  
-    ax.plot(gain_moyen_etiquette, label = 'gain_moyen_etiquette') # pb dimension liste et nptq
+    ax.plot(df_gain_moyen_bins, label = 'gain_moyen_etiquette') # modifi index
+    plt.legend()
     plt.show()
+
+
+# =============================================================================
+#     # Tracé du gain moyen d'étiquette sur périodes de temps 
+#     period_list = list(range(0,120,5))
+#     gain_moyen_etiquette = []
+#     #for period in tqdm.tqdm(period_list[:-1]):
+#     for i in range(0,23):
+#         borne_inf = period_list[i]
+#         borne_sup= period_list[i+1]
+#         gain_moyen_sur_cette_periode = df_epc_evolution[(df_epc_evolution.ecart_date > borne_inf) & (df_epc_evolution.ecart_date < borne_sup)]['gain_etiquette'].mean()
+#         gain_moyen_etiquette.append(gain_moyen_sur_cette_periode)
+# 
+#     fig,ax = plt.subplots(figsize=(5,5), dpi=300)  
+#     ax.plot(gain_moyen_etiquette, label = 'gain_moyen_etiquette') # pb dimension liste et nptq
+#     plt.show()
+# =============================================================================
 
     
     # sns.regplot(data=df_epc_evolution, x='ecart_date', y='gain_etiquette') 
@@ -349,7 +362,7 @@ def plot_gain_period_cumule(dep_code):
     return
 
 
-def dicts_dep_gain_moyen_etiquette(period):
+def dicts_dep_gain_moyen_etiquette(period, save_json):
     
     france = France()
     
@@ -359,13 +372,42 @@ def dicts_dep_gain_moyen_etiquette(period):
 
     for dep in tqdm.tqdm(france.departements) :
         dep_code = dep.code
-        print(dep) 
         part_dpe_stables, gain_moyen_etiquette, gain_moyen_etiquette_parmi_modif = analyse_gain_etiquette(dep_code, period=period)
-        dict_part_dpe_stables[dep] = part_dpe_stables
+        dict_part_dpe_stables[dep] = part_dpe_stables*100
         dict_gain_moyen_etiquette[dep] = gain_moyen_etiquette
         dict_gain_moyen_etiquette_parmi_modif[dep] = gain_moyen_etiquette_parmi_modif
+    
+    # todo : enregistrer en json mais besoin departement --> dep code
+    # if save_json:
+    #     dict_part_dpe_stables
+    #     print(json.dumps(dict_part_dpe_stables, indent=4)) 
+    
+    # Tracé et enregistrement des cartes
+    output_folder = os.path.join('output', 'cartes_analyse_gain_etiquettes')
+    os.makedirs(output_folder, exist_ok=True)
+
+    save = f'carte_part_dpe_stables_sur_{period}_jours'
+    map_title = f'Part des DPEs stables sur {period} jours (%)'
+    draw_departement_map(dict_part_dpe_stables, output_folder,save=save, map_title=map_title) # todo : fixer les bornes de la colorbar ? 
+    plt.show()
+    plt.close()
+    
+    save = f'carte_gain_moyen_etiquette_sur_{period}_jours'
+    map_title = f"Gain moyen d'étiquette sur {period} jours"
+    draw_departement_map(dict_gain_moyen_etiquette, output_folder, save=save, map_title=map_title)
+    plt.show()
+    plt.close()
+    
+    save = f'carte_gain_moyen_etiquette_parmi_modif_sur_{period}_jours'
+    map_title = f"Gain moyen d'étiquette parmi les DPE modifiés sur {period} jours"
+    draw_departement_map(dict_gain_moyen_etiquette_parmi_modif, output_folder, save=save, map_title=map_title)
+    plt.show()
+    plt.close()
 
     return dict_part_dpe_stables, dict_gain_moyen_etiquette, dict_gain_moyen_etiquette_parmi_modif
+
+
+    
 
 
 # %%
@@ -1092,7 +1134,7 @@ def main():
         
         
     # analyse des champs modifiés
-    if True:  
+    if False:  
         # filter_bdnb_individual('33',True)
         # filter_bdnb_individual('44',True)
         # filter_bdnb_individual('69',True)
@@ -1115,8 +1157,18 @@ def main():
         variable = 'surface'
         regplot_influence_variable(dep_code, variable, period = period, display_class=False, relatif=True)
     
-    if False:
-        bdnb_filter_individual = filter_bdnb_individual('91',30)
+    # Enregistrement de la bdnb filtrée sur les logements individuels pour tous les départements
+    if True:
+        # france = France()
+        # for dep in france.departements:
+        #     print(dep)
+        #     dep_code = dep.code
+        #     filter_bdnb_individual(dep_code, force=False)
+            
+        for dep_code in tqdm.tqdm(range(81, 95)):
+            print(dep_code)
+            dep_code = str(dep_code)
+            filter_bdnb_individual(dep_code, force=False)
         
     
     tac = time.time()
