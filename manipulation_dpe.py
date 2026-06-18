@@ -180,7 +180,33 @@ def filter_manipulated(dep_code, period = 30):
     df_epc_evolution = variable_diff(dep_code, df_epc_evolution, variable = 'surface',  plot_variable_evolution = False, ecart_relatif = True)
 
     return df_epc_evolution   
+
+
+def filter_manipulated_national(period):
+    """
+    Creation du DataFrame des DPE successifs sur l'ensemble des départements.
+
+    Parameters
+    ----------
+    period : int
+        écart de temps maximal entre deux DPE successifs avant de considérer que des rénovations énergétiques ont pu avoir lieu.
+
+    Returns
+    -------
+    df_epc_evolution_national
+        DataFrame des paires de DPEs successifs pour chaque bâtiment.
+    """
     
+    
+    france=France()
+    df_epc_evolution_national = pd.DataFrame()
+    for dep in tqdm.tqdm(france.departements):
+        dep_code = dep.code
+        df_epc_evolution_dep = filter_manipulated(dep_code, period=period)
+        df_epc_evolution_national = pd.concat([df_epc_evolution_national, df_epc_evolution_dep])
+    
+    return df_epc_evolution_national   
+
 
 
 def variable_diff(dep_code, df_epc_evolution, variable = 'surface',  plot_variable_evolution = True, ecart_relatif = True): #todo : bizarre d'avoir dep_code ici ?
@@ -257,10 +283,17 @@ def variable_diff(dep_code, df_epc_evolution, variable = 'surface',  plot_variab
     return df_epc_evolution
 
 
-def plot_gain_period(dep_code, period_max=120, bins_size = 5):
+def plot_gain_period(national_scale, dep_code='91', period_max=120, bins_size = 5):
     
-    df_epc_evolution = filter_manipulated(dep_code, period_max)
-    df_epc_evolution['ecart_date'] = pd.to_datetime(df_epc_evolution.second_epc_date) - pd.to_datetime(df_epc_evolution.first_epc_date)
+    #todo : probleme de dimension de x et y si pas assez de donnees et donc que certains bins n'ont aucun dpe dedans (ex 75) --> augmenter bins_size dns ce cas ? ou creer x_value qui dépend directement du calcul de df_gain_moyen_bins
+    
+    if national_scale:
+        df_epc_evolution = filter_manipulated_national(period_max)
+    else:
+        df_epc_evolution = filter_manipulated(dep_code, period_max)
+        departement = Departement(dep_code)
+    
+    df_epc_evolution['ecart_date'] = pd.to_datetime(df_epc_evolution.second_epc_date, format="%d %b %Y") - pd.to_datetime(df_epc_evolution.first_epc_date, format="%d %b %Y")
     df_epc_evolution['ecart_date'] = df_epc_evolution['ecart_date'].dt.days
     # Calcul du gain moyen d'étiquette sur l'ensemble des paires de DPEs successifs
     epc_order = {'A':7, 'B': 6, 'C': 5, 'D': 4, 'E': 3, 'F': 2, 'G': 1} # on attribue valeur à chaque classe
@@ -279,30 +312,35 @@ def plot_gain_period(dep_code, period_max=120, bins_size = 5):
     #df_gain_moyen = df_epc_evolution.groupby(['ecart_date'])['gain_etiquette'].mean() # moyenne sans grouper par périodes
     
     # Tracé du gain moyen d'étiquette en fonction de la période d'écart entre les deux DPE successifs 
-    df_epc_evolution['bins_ecart_date'] = pd.cut(df_epc_evolution.ecart_date, list(range(0, period_max+1, bins_size)), include_lowest=True)    
-    df_gain_moyen_bins = df_epc_evolution.groupby(['bins_ecart_date'])['gain_etiquette'].mean()
-        
+    bins = list(range(0, period_max+1, bins_size))
+    df_epc_evolution['bins_ecart_date'] = pd.cut(df_epc_evolution.ecart_date, bins=bins, include_lowest=True) # include_lowest=True pour inclure 0 dans le premier bin
+    stats_gain_moyen = df_epc_evolution.groupby(['bins_ecart_date'])['gain_etiquette'].agg(['mean', 'std'])
+    # df_gain_moyen_bins = df_gain_moyen_bins.append([0]) # todo : rajouter un 0 pour que la courbe soit plus belle
+    #df_gain_moyen_bins_std = df_epc_evolution.groupby(['bins_ecart_date'])['gain_etiquette'].std()
+    
+    # x_values = bins[1:]
+    # x_values = bins[:-1]
+    x_values = [interval.left for interval in stats_gain_moyen.index]  # extraction des bornes inférieures pour l'axe x
+    y_mean = stats_gain_moyen['mean'].values
+    y_std = stats_gain_moyen['std'].values # Écart-type
+    
     fig,ax = plt.subplots(figsize=(5,5), dpi=300)  
-    ax.plot(df_gain_moyen_bins, label = 'gain_moyen_etiquette') # modifi index
+    ax.plot(x_values, y_mean, ds='steps-post', label="Gain d'étiquette moyen")
+    ax.fill_between(x_values, y_mean - y_std, y_mean + y_std, step = 'post', alpha=0.2, label='Ecart-type')
+    ax.set_xticks(ticks=list(range(0, period_max+1, 10)))
+    #ax.errorbar(yerr=)
+    if national_scale:
+        ax.set_title(f"Ensemble des départements, N={len(df_epc_evolution)}")
+    else:
+        ax.set_title(f"{departement.name} - {departement.code}, N={len(df_epc_evolution)}")
+    ax.set_xlim(0, period_max)
+    #ax.set_ylim(bottom=0)
+    ax.set_xlabel('Écart entre les DPE successifs (jours)')
+    ax.set_ylabel('Gain moyen d\'étiquette')
+    
     plt.legend()
+    plt.grid(True, alpha=0.3, axis='y')
     plt.show()
-
-
-# =============================================================================
-#     # Tracé du gain moyen d'étiquette sur périodes de temps 
-#     period_list = list(range(0,120,5))
-#     gain_moyen_etiquette = []
-#     #for period in tqdm.tqdm(period_list[:-1]):
-#     for i in range(0,23):
-#         borne_inf = period_list[i]
-#         borne_sup= period_list[i+1]
-#         gain_moyen_sur_cette_periode = df_epc_evolution[(df_epc_evolution.ecart_date > borne_inf) & (df_epc_evolution.ecart_date < borne_sup)]['gain_etiquette'].mean()
-#         gain_moyen_etiquette.append(gain_moyen_sur_cette_periode)
-# 
-#     fig,ax = plt.subplots(figsize=(5,5), dpi=300)  
-#     ax.plot(gain_moyen_etiquette, label = 'gain_moyen_etiquette') # pb dimension liste et nptq
-#     plt.show()
-# =============================================================================
 
     
     # sns.regplot(data=df_epc_evolution, x='ecart_date', y='gain_etiquette') 
