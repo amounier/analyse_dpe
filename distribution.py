@@ -1189,7 +1189,7 @@ def main():
             plt.show()
             plt.close()
             
-            if True: # todo : creer une fonction qui fait çacut_france
+            if True: # todo : creer une fonction qui fait ça cut_france
                 # Regplot entre bunching et nb_dpe_filtre
                 
                 df_bunching = pd.DataFrame().from_dict(dict_dep_bunching, orient='index', columns=[f'Somme_seuils_{seuils_sans_slash}_method_{method}'])
