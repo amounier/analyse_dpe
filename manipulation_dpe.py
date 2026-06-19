@@ -6,30 +6,14 @@ Created on Tue Jun  2 12:23:12 2026
 @author: audrey
 """
 
-# ATTENTION : run "pip install jsondiff" et "pip install selenium" dans la console au préalable !
-
 import time
-import requests
-import io
 import os
-import geopandas as gpd
 import numpy as np
 import pandas as pd
-from IPython.display import display
-import cartopy.io.img_tiles as cimgt
-import cartopy.geodesic as cgeo
-import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
-import subprocess
-import dask_geopandas 
-import re
-import warnings
 from urllib.request import urlopen, Request
-from PIL import Image
 from datetime import date
-from pyogrio.errors import DataSourceError
-from urllib.error import HTTPError
-
+from scipy.stats import zscore
 import seaborn as sns
 import plotly.io as pio
 pio.renderers.default='browser'
@@ -38,12 +22,11 @@ from pySankey.sankey import sankey
 import json
 import jsondiff as jd
 from jsondiff import diff
-import pprint
 import tqdm
 
-from utils import etiquette_colors_dict
+from utils import etiquette_colors_dict, etiquette_ep_dict
 from administrative import Departement, France, draw_departement_map
-from download import get_bdnb, draw_local_map, neighbourhood_map, get_batiment_groupe_infos
+from download import get_bdnb
 
 
 def filter_bdnb_individual(dep_code, force):
@@ -139,6 +122,10 @@ def filter_manipulated(dep_code, period = 30):
     
     # departement = Departement(dep_code)
     bdnb_df = filter_bdnb_individual(dep_code, force=False) # prend du temps si non déjà stocké en .csv
+    
+    # Filtrage des valeurs aberrantes
+    filtre = zscore(bdnb_df.conso_5_usages_ep_m2)<5
+    bdnb_df = bdnb_df[filtre]
     
     # on conserve uniquement les bâtiments qui ont plus d'un DPE
     bat_many_dpe = bdnb_df['batiment_groupe_id'].value_counts() # décompte du nb de dpe par bâtiment
@@ -281,6 +268,32 @@ def variable_diff(dep_code, df_epc_evolution, variable = 'surface',  plot_variab
 
     
     return df_epc_evolution
+
+
+def plot_distrib_dpe_sucessifs(national_scale, period, dep_code='91', max_xlim =600):
+    if national_scale:
+        df_epc_evolution = filter_manipulated_national(period)
+    else:
+        df_epc_evolution = filter_manipulated(dep_code, period)
+        departement = Departement(dep_code)
+    
+    bins = list(range(0,round(max(df_epc_evolution.first_epc_cons))))
+    fig, ax = plt.subplots(figsize=(5,5), dpi=300)
+    df_epc_evolution.hist('first_epc_cons', bins=bins, ax=ax, label = 'Premiers DPE', color= 'r', alpha = 0.6)
+    df_epc_evolution.hist('second_epc_cons', bins=bins, ax=ax, label = 'Seconds DPE', color= 'blue', alpha = 0.4)
+    if national_scale:
+        ax.set_title(f"Ensemble des départements sur {period} jours, N={len(df_epc_evolution)}")
+    else:
+        ax.set_title(f"{departement.name} - {departement.code} sur {period} jours, N={len(df_epc_evolution)}")
+    ax.set_ylabel("Nombre d'observations")
+    ax.set_xlabel("Consommation annuelle en énergie primaire (kWh.m$^{-2}$)")
+    ax.set_xticks(ticks=[int(x) for x in list(set(list(np.asarray(list(etiquette_ep_dict.values())).flatten()))) if not np.isinf(x)] + [max_xlim])
+    ax.set_xlim(0, max_xlim)
+    plt.grid(True, alpha=0.3, zorder=-1)
+    plt.legend()
+    plt.show()
+    
+    return
 
 
 def plot_gain_period(national_scale, dep_code='91', period_max=120, bins_size = 5):
@@ -451,7 +464,7 @@ def dicts_dep_gain_moyen_etiquette(period, save_json):
 # %%
 
 
-def plot_heatmap(dep_code, frequency, period = 30):
+def plot_heatmap(national_scale, dep_code, frequency, period = 30):
     """
     Formate un DataFrame de comparaison de DPE successifs en un DataFrame 2D comptant les évolutions entre classes.
 
@@ -469,13 +482,16 @@ def plot_heatmap(dep_code, frequency, period = 30):
         Colonnes = 1er DPE, Lignes = 2e DPE.
     """
     
-    departement = Departement(dep_code)
-    
-    # Version rapide non nettoyée
-    df_epc_evolution = filter_manipulated(dep_code, period = period)
-    
-    # Version nettoyée des DPEs en double : (beaucoup plus long car il faut télécharger tous les json) mais ne change pas grand chose --> a eviter
-    # df_epc_evolution = delete_dpe_copies(dep_code, plot_surface_evolution = False, period = period)
+    if national_scale:
+        df_epc_evolution = filter_manipulated_national(period)
+    else:
+        departement = Departement(dep_code)
+        
+        # Version rapide non nettoyée
+        df_epc_evolution = filter_manipulated(dep_code, period = period)  
+        
+        # Version nettoyée des DPEs en double : (beaucoup plus long car il faut télécharger tous les json) mais ne change pas grand chose --> a eviter
+        # df_epc_evolution = delete_dpe_copies(dep_code, plot_surface_evolution = False, period = period)
     
     # Décompte de la fréquence des transitions avec crosstab()
     df_heatmap = pd.crosstab(
@@ -492,7 +508,7 @@ def plot_heatmap(dep_code, frequency, period = 30):
     # Pour afficher seulement les valeurs non nulles de la matrice
     annot = df_heatmap
     annot = np.round(annot, 1)
-    annot = np.where(annot != 0, annot, "") # todo: modifier pour garder que cases > 0.1 ?
+    annot = np.where(annot != 0, annot, "")
 
 
     # Tracé de la figure    
@@ -507,7 +523,10 @@ def plot_heatmap(dep_code, frequency, period = 30):
     else:
         ax = sns.heatmap(df_heatmap, ax=ax, annot=annot, fmt="", cmap='bone_r', cbar_ax=cbar_ax,cbar=True,cbar_kws={'label':"Nombre d'observations"})
     
-    ax.set_title(f'Modification des DPE sur une période de {period} jours\n{departement.name} - {departement.code}, N={len(df_epc_evolution)}')
+    if national_scale : 
+        ax.set_title(f'Ensemble des départements\nPériode de {period} jours, N={len(df_epc_evolution)}')
+    else : 
+        ax.set_title(f'{departement.name} - {departement.code}\nPériode de {period} jours, N={len(df_epc_evolution)}')
     for spine in ax.spines.values():
         spine.set_visible(True)
     for spine in cbar_ax.spines.values():
@@ -522,7 +541,10 @@ def plot_heatmap(dep_code, frequency, period = 30):
     existing_files = os.listdir(output_folder_heatmap)
     
     # Enregistrement de la figure
-    save_name = f'DPE_manipulation_classes_{dep_code}_sur_{period}_jours.png'
+    if national_scale : 
+        save_name = f'DPE_manipulation_classes_national_sur_{period}_jours.png'
+    else : 
+        save_name = f'DPE_manipulation_classes_{dep_code}_sur_{period}_jours.png'
     if frequency:
         save_name = save_name.replace('.png','_frequency.png')
 
@@ -1102,10 +1124,10 @@ def main():
     dep_code = '91'
     departement = Departement(dep_code)
     
-    period = 30 # jours d'écart maximal entre deux DPE successifs
+    period = 20 # jours d'écart maximal entre deux DPE successifs
     top_n = None # nombre de champs affichés sur l'histogramme des champs modifiés
     
-    
+
     # test type_batiment_dpe=='maison' MAIS “nb_log”=!1 
     if False:
         test_dpe_logement, test_rel_batiment_groupe_dpe_logement, test_batiment_groupe_compile = get_bdnb(dep_code)
@@ -1128,18 +1150,22 @@ def main():
         test_filter_individual = test_join_id_dpe.merge(test_dpe_logement, how='inner', on='identifiant_dpe') # on conserve seulement les DPE méthode 3CL 2021 correspondant aux maisons
         df_bug_maison = test_filter_individual[test_filter_individual.ffo_bat_nb_log != 1]
 
-
+    # Enregistrement de la bdnb filtrée sur les logements individuels pour tous les départements
+    if False:
+        france = France()
+        for dep in tqdm.tqdm(france.departements):
+            dep_code = dep.code
+            filter_bdnb_individual(dep_code, force=False)
+    
     
     # graphe de passage heatmap
     if False:        
         plot_heatmap(dep_code, frequency=True, period = 40)
         
-        
     # Sankey diagram with Plotly
     if False: 
         plotly_sankey(dep_code, 1, 30)
         
-    
     # Sankey diagram with pySankey
     if False:
 
@@ -1172,7 +1198,7 @@ def main():
         
         
     # analyse des champs modifiés
-    if False:  
+    if True:  
         # filter_bdnb_individual('33',True)
         # filter_bdnb_individual('44',True)
         # filter_bdnb_individual('69',True)
@@ -1195,19 +1221,11 @@ def main():
         variable = 'surface'
         regplot_influence_variable(dep_code, variable, period = period, display_class=False, relatif=True)
     
-    # Enregistrement de la bdnb filtrée sur les logements individuels pour tous les départements
-    if True:
-        # france = France()
-        # for dep in france.departements:
-        #     print(dep)
-        #     dep_code = dep.code
-        #     filter_bdnb_individual(dep_code, force=False)
+
             
-        for dep_code in tqdm.tqdm(range(81, 95)):
-            print(dep_code)
-            dep_code = str(dep_code)
-            filter_bdnb_individual(dep_code, force=False)
-        
+    if False:
+        # plot_gain_period(True, '91', 120, 5)
+        plot_distrib_dpe_sucessifs(False, )
     
     tac = time.time()
     print(f'Done in {tac-tic:.2f}s.')
