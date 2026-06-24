@@ -17,7 +17,7 @@ import statsmodels.api as sm
 
 from administrative import  list_dep_code, Departement
 from distribution import calcul_bunching_france, cut_france_bunching
-
+from manipulation_dpe import dicts_dep_gain_moyen_etiquette
 
 
 
@@ -87,6 +87,7 @@ def tension_immob_dep():
     
 
 def get_nb_diagnostiqueur_dep():
+    # rq : la corse n'a pas de diagnostiqueurs !
     data = pd.read_csv(os.path.join('data','MTE','annuaire-diagnostiqueurs-immobiliers.csv'),sep=';')
     data = data[data['Type de certificat'].str.contains('DPE')]
     data['CP'] = [f"{e:05d}" for e in data.CP]
@@ -149,8 +150,11 @@ def main():
         
         # Fixation des paramètres de mesure du bunching
         old_built_filter = True
-        method='diff_moyenne_gauche_itv'
+
         # method='AMP'
+        # method = 'diff_beta_cente_abs'
+        method='diff_moyenne'
+        
         itv_bunching=10
         window_size=50
             
@@ -160,15 +164,17 @@ def main():
         france_bunching_cut, seuils_sans_slash = cut_france_bunching(france_bunching, seuils)
         france_bunching[f'Somme_seuils_{seuils_sans_slash}_method_{method}'] = france_bunching_cut.sum(axis=1) # on somme sur les lignes des colonnes conservées    
         
-        bunching = france_bunching[[f'Somme_seuils_{seuils_sans_slash}_method_{method}']]
+        bunching = france_bunching[[f'Somme_seuils_{seuils_sans_slash}_method_{method}']] #todo : ne sert a rien de rajouter ligne a france_binching ? on pourrait direct dire bunching = = france_bunching_cut.sum(axis=1) ?
         
         # Vecteur des paramètres
-        variables = df_tension_immob_dep
+        variables = df_tension_immob_dep # todo : dire direct variables=tension_immob_dep() ?
         variables = sm.add_constant(variables)
         
         # variables_list = ['part_A','part_Abis','part_B1','part_B2','part_C']
         # variables_list = ['part_A','part_C','zcl_Tref','total_logements','nb_diagnostiqueurs_dep']
-        variables_list = ['part_C','part_A','total_logements', 'P22_RP_LOC']
+        variables_list = ['part_C', 'zcl_H3','total_logements', 'P22_RP_LOC']
+        variables_list = ['gain_moyen_etiquette','part_dpe_stables']
+        
         
         bunching = bunching.join(variables)
         # bunching = bunching.join(get_nb_diagnostiqueur_dep())
@@ -179,27 +185,33 @@ def main():
         bunching["zcl_Tref"] = [Departement(e).climat_Tref for e in bunching.index]
         bunching['zcl_H3'] = (bunching.zcl == 'H3').map(int)
         
-        # ajout de l'inverse du nombre de logements
+        # ajout du log du nombre de logements
         bunching['log_total_logements'] = np.log(bunching.total_logements)
         
-        bunching = bunching[[f'Somme_seuils_{seuils_sans_slash}_method_{method}','const']+variables_list].dropna()
-
+        # ajout du gain moyen d'étiquette sur une période # todo : l'enlever, rien a faire dans econometrie
+        period = 20
+        dict_part_dpe_stables, dict_gain_moyen_etiquette, dict_gain_moyen_etiquette_parmi_modif = dicts_dep_gain_moyen_etiquette(period)
+        bunching['part_dpe_stables'] = dict_part_dpe_stables.values()
+        bunching['gain_moyen_etiquette'] = dict_gain_moyen_etiquette.values() # todo : comment etre sure que les departements sont bien alignés ?
         
-        model = sm.OLS(bunching[f'Somme_seuils_{seuils_sans_slash}_method_{method}'], bunching[['const']+variables_list])
+        
+        bunching_test = bunching[[f'Somme_seuils_{seuils_sans_slash}_method_{method}','const']+variables_list].dropna() # on ne garde que les variables (=colonnes) qui nous intéressent
+        
+        model = sm.OLS(bunching_test[f'Somme_seuils_{seuils_sans_slash}_method_{method}'], bunching_test[['const']+variables_list])
         results = model.fit()
         results.params
         print(results.summary())
         
         
-        p = sns.pairplot(data= bunching[[f'Somme_seuils_{seuils_sans_slash}_method_{method}']+variables_list])
+        p = sns.pairplot(data= bunching_test[[f'Somme_seuils_{seuils_sans_slash}_method_{method}']+variables_list])
         p.fig.suptitle(f"Corrélation entre le bunching méthode {method} et d'autres variables, old_built_filter = {old_built_filter}")
         p.fig.subplots_adjust(top=0.96)
         
         if True :
             if old_built_filter:
-                save_path = os.path.join(output_folder,f'Pairplot_correlation_bunching_methode_{method}_old_built.png') 
+                save_path = os.path.join(output_folder,f'Pairplot_correlation_bunching_methode_{method}_{variables_list}_old_built.png') 
             else:
-                save_path = os.path.join(output_folder,f'Pairplot_correlation_bunching_methode_{method}.png') 
+                save_path = os.path.join(output_folder,f'Pairplot_correlation_bunching_methode_{method}_{variables_list}.png') 
             plt.savefig(save_path, bbox_inches='tight')
 
 

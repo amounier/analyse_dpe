@@ -11,7 +11,7 @@ import numpy as np
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy.stats import beta, zscore # attention, beta (variable aléatoire) =/= sc.beta (fonction)
+from scipy.stats import beta, zscore, pearsonr # attention, beta (variable aléatoire) =/= sc.beta (fonction)
 from scipy.optimize import curve_fit
 import scipy.special as sc 
 from datetime import date
@@ -21,6 +21,7 @@ import seaborn as sns
 from administrative import  list_dep_code, Departement, France, draw_departement_map
 from download import get_bdnb
 from utils import etiquette_colors_dict,etiquette_ep_dict,etiquette_ep_seuils
+from manipulation_dpe import dicts_dep_gain_moyen_etiquette
 
 
 def get_dpe_consumption(dep_code, old_built_filter=False):
@@ -310,6 +311,8 @@ def plot_dpe_distribution(path, dep_code, save, plot_mean, plot_median, window_s
         color = etiquette_colors_dict.get(eti)
         counter_dict_eti = {k:v for k,v in counter_dict_sorted.items() if k > inf_ep and k <= sup_ep}
         ax.bar(list(counter_dict_eti.keys()), list(counter_dict_eti.values()), width=1., color=color, label=eti)
+        # plt.vlines(320, 0, counter_dict_sorted[320], color='k', linestyles='dashed')  # pour illustration méthode AMP 
+        # plt.vlines(340, 0, counter_dict_sorted[340], color='k', linestyles='dashed')  # pour illustration méthode AMP
         
     ax.set_xlim([0,max_xlim])
     fig.suptitle(f"{departement.name} - {departement.code}")
@@ -342,8 +345,9 @@ def plot_dpe_distribution(path, dep_code, save, plot_mean, plot_median, window_s
         x_data = fit_dpe_data_df['x_data']
         pdf = fit_dpe_data_df['y_beta_curve_fit']
         ax.plot(x_data, pdf*nb_dpe_filtre, "k--", label=f'curve_fit\n(R$^{{2}}$={r2_value:.2f})')
-
-
+  
+    # ax.set_xlim([310,350]) # pour illustration méthode AMP
+    # ax.set_ylim([0,260]) # pour illustration méthode AMP
     ax.legend()    
 
     # Enregistrement de la figure
@@ -1033,7 +1037,7 @@ def df_compare_methods(seuils, methods, path, old_built_filter, itv_bunching=10,
      
     else:
         df_compare = pd.read_csv(os.path.join(output_folder_bunching, save_name)) #, names=)#, index_col='dep_code')  # todo : modifier pour avoir df_compare plus propre
-        df_compare = df_compare[[f'Méthode {method}' for method in methods]]
+        df_compare = df_compare[['département']+[f'Méthode {method}' for method in methods]]
     
     return df_compare
    
@@ -1055,7 +1059,7 @@ def main():
     output_folder = os.path.join('output',today)
     os.makedirs(output_folder, exist_ok=True)
     
-    dep = Departement('85')
+    dep = Departement('26')
     old_built_filter = True
     window_size = 50  # fenêtre de la moyenne glissante (rolling de la méthode 'diff_moyenne')
     
@@ -1063,9 +1067,9 @@ def main():
     # DISTRIBUTION DES DPE
     
     # tracé de la distribution des dpe du département
-    if False:
+    if True:
         #dpe_data = get_dpe_consumption(dep.code)
-        plot_dpe_distribution(output_folder,dep.code, save=True, plot_mean=True, plot_median=False, window_size = window_size, plot_fit=False, plot_curve_fit=True, old_built_filter=old_built_filter, max_xlim=600)
+        plot_dpe_distribution(output_folder,dep.code, save=True, plot_mean=False, plot_median=False, window_size = window_size, plot_fit=False, plot_curve_fit=False, old_built_filter=old_built_filter, max_xlim=600)
     
     
         
@@ -1073,8 +1077,8 @@ def main():
         
     # choix des paramètres de mesure du bunching
     # method='diff_beta_centre_abs'
-    # method='diff_moyenne'
-    method = 'AMP_nb_dpe'
+    method='diff_moyenne'
+    # method = 'AMP_nb_dpe'
     # method = 'AMP'
     # itv_bunching = 5
     itv_bunching = 10
@@ -1099,7 +1103,7 @@ def main():
         
         
     # carte du bunching      
-    if True:
+    if False:
         today = pd.Timestamp(date.today()).strftime('%Y%m%d')
         output_folder = os.path.join('output',today)
         os.makedirs(output_folder, exist_ok=True)
@@ -1279,7 +1283,7 @@ def main():
         
     # SEABORN COMPARAISON METHODES
 
-    if True : 
+    if False : 
         seuils = ['D/E', 'E/F', 'F/G']
         methods = ['AMP_nb_dpe', 'diff_moyenne', 'diff_beta_centre_abs']
         # seuils = ['E/F']
@@ -1293,22 +1297,83 @@ def main():
         df_compare = df_compare_methods(seuils, methods, output_folder, old_built_filter=old_built_filter, itv_bunching=itv_bunching)        
                    
 
-        p = sns.pairplot(data= df_compare[[e for e in df_compare.columns if e.startswith('Méthode')]])#, hue='nb_dpe_filtre')    
+        p = sns.pairplot(data= df_compare[[e for e in df_compare.columns if e.startswith('Méthode')]], kind='reg', plot_kws={'marker': '+'}, diag_kind='kde')#, hue='nb_dpe_filtre')    
         # p.fig.suptitle(f"Corrélation entre les différentes méthodes de mesure du bunching\naux seuils {seuils_sans_slash}, old_built_filter = {old_built_filter}")
         # p.fig.subplots_adjust(top=0.92)
+        
+        # Fonction qui affiche r, coef de corrélation de pearson, et la p-value
+        def corrfunc(x, y, **kws):
+            r, p = pearsonr(x, y)
+            ax = plt.gca()
+            ax.annotate(
+                f"r = {r:.2f}\np = {p:.2e}",
+                xy=(0.05, 0.85),
+                xycoords=ax.transAxes,
+                fontsize=10
+            )
+            
+        p.map_upper(corrfunc)
 
 
         if old_built_filter:
             save_path = os.path.join(output_folder,f'Pairplot_correlation_methodes_{methods}_seuils_{seuils_sans_slash}_old_built.png') 
         else: 
             save_path = os.path.join(output_folder,f'Pairplot_correlation_methodes_{methods}_seuils_{seuils_sans_slash}.png') 
-        plt.savefig(save_path, bbox_inches='tight')
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
     
-        # plt.show()
+        plt.show()
         # plt.close()
         
         
+    # COMPARAISON METHODES BUNCHING ET GAIN MOYEN ETIQUETTE 
+    
+    if False : 
+        seuils = ['D/E', 'E/F', 'F/G']
+        methods = ['AMP_nb_dpe', 'diff_moyenne', 'diff_beta_centre_abs']
+        itv_bunching = 10
+        period = 20
+        # attention : dcp là on a le même itv_bunching pour toutes les méthodes !!
+    
+        # formatage d'une chaîne de caractère simplifiée pour identifier les seuils
+        seuils_sans_slash = '_'.join(seuils)
+        seuils_sans_slash = seuils_sans_slash.replace("/","")
         
+        df_compare = df_compare_methods(seuils, methods, output_folder, old_built_filter=old_built_filter, itv_bunching=itv_bunching)        
+        
+        
+        dict_part_dpe_stables, dict_gain_moyen_etiquette, dict_gain_moyen_etiquette_parmi_modif = dicts_dep_gain_moyen_etiquette(period)
+        df_compare['gain_moyen_etiquette'] = dict_gain_moyen_etiquette.values()
+        df_compare['part_dpe_stables'] = dict_part_dpe_stables.values()  # todo : comment etre sure que les departements sont bien alignés ?
+         
+        
+    
+        p = sns.pairplot(data= df_compare[[e for e in df_compare.columns if e.startswith('Méthode')]+['gain_moyen_etiquette','part_dpe_stables']], kind='reg', plot_kws={'marker': '+'}, diag_kind='kde')#, hue='nb_dpe_filtre')    
+        # p.fig.suptitle(f"Corrélation entre les différentes méthodes de mesure du bunching\naux seuils {seuils_sans_slash}, old_built_filter = {old_built_filter}")
+        # p.fig.subplots_adjust(top=0.92)
+        
+        # Fonction qui affiche r, coef de corrélation de pearson, et la p-value
+        def corrfunc(x, y, **kws):
+            r, p = pearsonr(x, y)
+            ax = plt.gca()
+            ax.annotate(
+                f"r = {r:.2f}\np = {p:.2e}",
+                xy=(0.05, 0.85),
+                xycoords=ax.transAxes,
+                fontsize=10
+            )
+            
+        p.map_upper(corrfunc)
+    
+    
+        if old_built_filter:
+            save_path = os.path.join(output_folder,f'Pairplot_correlation_methodes_{methods}_seuils_{seuils_sans_slash}_old_built.png') 
+        else: 
+            save_path = os.path.join(output_folder,f'Pairplot_correlation_methodes_{methods}_seuils_{seuils_sans_slash}.png') 
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    
+        plt.show()
+        # plt.close()
+      
         
     # TEST CLASSE GES VS CLASSE ENERGIE
     
