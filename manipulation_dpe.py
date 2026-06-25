@@ -139,7 +139,7 @@ def filter_manipulated(dep_code, period = 30):
         consecutive_pairs = []
         for i in range(len(group)-1):
             date_diff = (group.iloc[i+1]['date_etablissement_dpe'] - group.iloc[i]['date_etablissement_dpe']).days
-            if date_diff < period :
+            if date_diff < period : # todo : mettre un <=
                 consecutive_pairs.append({
                     'adresse_brut': group.iloc[i]['adresse_brut'],
                     'first_epc_id': group.iloc[i]['identifiant_dpe'],
@@ -305,7 +305,7 @@ def plot_distrib_dpe_sucessifs(national_scale, period, dep_code='91', max_xlim =
     bins = list(range(0,round(max(df_epc_evolution.epc_cons_1))))
     fig, ax = plt.subplots(figsize=(5,5), dpi=300)
     df_epc_evolution.hist('epc_cons_1', bins=bins, ax=ax, label = 'Premiers DPE', color= 'r', alpha = 0.6, grid=False)
-    df_epc_evolution.hist('epc_cons_2', bins=bins, ax=ax, label = 'Seconds DPE', color= 'blue', alpha = 0.6, grid=False)
+    df_epc_evolution.hist('epc_cons_2', bins=bins, ax=ax, label = 'Seconds DPE', color= 'blue', alpha = 0.5, grid=False)
     if national_scale:
         ax.set_title(f"Ensemble des départements sur {period} jours, N={len(df_epc_evolution)}")
     else:
@@ -321,16 +321,97 @@ def plot_distrib_dpe_sucessifs(national_scale, period, dep_code='91', max_xlim =
     return
 
 
-def plot_distrib_ecart_conso(national_scale, period, dep_code='91', max_xlim =600):
+def formatage_dpe_successifs_data(df_epc_evolution, window_size):
+    
+    dpe_data = get_dpe_consumption(dep_code, old_built_filter=old_built_filter) # c'est ca qui prend du temps
+    dpe_data = dpe_data.dropna()
+    dpe_data = dpe_data.map(round)
+    counter_dict = dict(dpe_data.conso_5_usages_ep_m2.value_counts())
+    counter_dict_sorted = {k: v for k, v in sorted(counter_dict.items(), key=lambda item: item[0])}
+    counter_df_sorted = pd.DataFrame(list(counter_dict_sorted.items()), columns=["conso_5_usages_ep_m2_arrondie","nb_observations"]) # df trié par conso_ep (besoin d'un DataFrame pour utiliser rolling)
+    
+    # print('counter_df_sorted \n', counter_df_sorted)
+    
+    # tracé des données à fit
+    # plt.plot(list(counter_dict_sorted.keys()), list(counter_dict_sorted.values()), "k", label='données', linewidth = 0.5)
+    
+    # calcul de la moyenne glissante des premier DPE
+    rolling_dpe = counter_df_sorted['nb_observations_1'].rolling(window=window_size, min_periods=1, center=True) 
+    counter_df_sorted["nb_obs_moyenne_1"] = rolling_dpe.mean()  # ajout colonne moyenne dans le DataFrame
+    
+    # calcul de la moyenne/médiane glissante des second DPE
+    rolling_dpe = counter_df_sorted['nb_observations_2'].rolling(window=window_size, min_periods=1, center=True) 
+    counter_df_sorted["nb_obs_moyenne_2"] = rolling_dpe.mean()  # ajout colonne moyenne dans le DataFrame
+    
+    
+    #pd.options.display.max_columns = None
+    #print('counter_df_sorted pimpé \n', counter_df_sorted)
+    
+    return counter_df_sorted
+
+
+    
+
+def calcul_bunching_dpe_successifs(df_epc_evolution):
     if national_scale:
         df_epc_evolution = filter_manipulated_national(period)
     else:
         df_epc_evolution = filter_manipulated(dep_code, period)
         departement = Departement(dep_code)
     
+    # Initialisation d'un dataframe des conso_5_usages
+    max_epc_cons = max(df_epc_evolution['epc_cons_1'].max(),df_epc_evolution['epc_cons_2'].max())
+    # df_dpe_successifs = pd.DataFrame(data=np.arange(0,max_epc_cons+1, dtype=int), columns=['conso_5_usages_ep_m2'])
     
+    df_dpe_successifs = pd.DataFrame(index=np.arange(0, int(max_epc_cons) + 1)) #, columns=['conso_5_usages_ep_m2'])
+    df_dpe_successifs.rename_axis('conso_5_usages_ep_m2', inplace=True)
+
     
-    return
+    # Dictionnaires du nombre de DPE par valeur de conso_5_usages
+    count_epc_cons_1 = df_epc_evolution.epc_cons_1.map(round).value_counts()
+    df_dpe_successifs = df_dpe_successifs.join(count_epc_cons_1) #, on='epc_cons_1')
+    # counter_dict_1 = dict(df_epc_evolution.epc_cons_1.map(round).value_counts())
+    # counter_dict_sorted_1 = {k: v for k, v in sorted(counter_dict_1.items(), key=lambda item: item[0])}
+    
+    count_epc_cons_2 = df_epc_evolution.epc_cons_2.map(round).value_counts()
+    df_dpe_successifs = df_dpe_successifs.join(count_epc_cons_2)
+
+    # counter_dict_2 = dict(df_epc_evolution.epc_cons_2.map(round).value_counts())
+    # counter_dict_sorted_2 = {k: v for k, v in sorted(counter_dict_2.items(), key=lambda item: item[0])}
+
+    df_dpe_successifs = df_dpe_successifs.fillna(0)
+    
+    # 1. Définir la plage de consommation cible
+    # max_epc_cons = df_epc_evolution['epc_cons_1'].max()
+    df_dpe_successifs = pd.DataFrame(index=np.arange(0, int(max_epc_cons) + 1), columns=['conso_5_usages_ep_m2'])
+    df_dpe_successifs.index.name = 'conso_5_usages_ep_m2'
+    
+    # 2. Préparer le décompte pour l'alignement
+    # On arrondit, on compte les occurrences, et on crée un Series indexé par la consommation
+    counts = df_epc_evolution['epc_cons_1'].round().value_counts()
+    
+    # 3. Joindre le décompte au dataframe cible
+    # L'index de 'counts' (conso arrondie) correspond à l'index de 'df_dpe_successifs'
+    df_dpe_successifs = df_dpe_successifs.join(counts)
+    
+    # Optionnel : Remplacer les NaN (valeurs de conso absentes dans les données) par 0
+    df_dpe_successifs = df_dpe_successifs.fillna(0)
+
+    return df_dpe_successifs
+
+# =============================================================================
+# NE SERT A RIEN CAR ON A DEJA PLOT VARIABLE DIFF 
+# def plot_distrib_ecart_conso(national_scale, period, dep_code='91', max_xlim =600):
+#     if national_scale:
+#         df_epc_evolution = filter_manipulated_national(period)
+#     else:
+#         df_epc_evolution = filter_manipulated(dep_code, period)
+#         departement = Departement(dep_code)
+#     
+#     
+#     
+#     return
+# =============================================================================
 
 
 def plot_gain_period(national_scale, dep_code='91', period_max=120, bins_size = 5):

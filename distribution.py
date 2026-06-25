@@ -411,7 +411,7 @@ def calcul_bunching(dep_code, method, itv_bunching, window_size, plot_ecart, pat
     counter_dict = dict(dpe_data.conso_5_usages_ep_m2.value_counts())
     counter_dict_sorted = {k: v for k, v in sorted(counter_dict.items(), key=lambda item: item[0])}
     
-    pd.options.display.max_columns = None
+    pd.options.display.max_columns = Nonerange(0,max_epc_cons)
     
     
     if method=='AMP': # méthode "Average Manipulation Density" (Civel et al.).
