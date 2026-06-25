@@ -106,19 +106,6 @@ def get_nb_diagnostiqueur_dep(force = False):
 
 def get_nb_rp_loc(force = False):
     # Nombre de résidences principales occupées par locataires
-    save_name = 'base-cc-logement-2022_light.csv'
-    if save_name not in os.listdir(os.path.join('data','INSEE')) or force:
-        df_nb_rp_loc = pd.read_excel(os.path.join('data','INSEE','base-cc-logement-2022.xlsx'), usecols=['CODGEO', 'P22_RP_LOC','P22_RP'], skiprows=5)  # names = ['CODGEO', 'nb_rp_loc']
-        df_nb_rp_loc.set_index('CODGEO', inplace=True)
-        df_nb_rp_loc = df_nb_rp_loc[~df_nb_rp_loc.index.str.startswith('97')] # uniquement territoire hexagonal
-        df_nb_rp_loc = df_nb_rp_loc[~df_nb_rp_loc.index.str.startswith('20')] # hors corse (2A et 2B aggrégé)
-        df_nb_rp_loc['dep_code'] = [Departement(e[:2]).code for e in df_nb_rp_loc.index]
-        df_nb_rp_loc = df_nb_rp_loc.groupby('dep_code')[['P22_RP_LOC','P22_RP']].sum()
-        df_nb_rp_loc['ratio_RP_loc'] = df_nb_rp_loc.P22_RP_LOC/df_nb_rp_loc.P22_RP
-        df_nb_rp_loc.to_csv(os.path.join('data','INSEE',save_name))
-    
-    df_nb_rp_loc = pd.read_csv(os.path.join('data','INSEE',save_name)).set_index('dep_code')
-    return df_nb_rp_loc[['ratio_RP_loc']]
     
 #%% ===========================================================================
 # script principal
@@ -169,7 +156,7 @@ def main():
         france_bunching_cut, seuils_sans_slash = cut_france_bunching(france_bunching, seuils)
         france_bunching[f'Somme_seuils_{seuils_sans_slash}_method_{method}'] = france_bunching_cut.sum(axis=1) # on somme sur les lignes des colonnes conservées    
         
-        bunching = france_bunching[[f'Somme_seuils_{seuils_sans_slash}_method_{method}']]
+        bunching = france_bunching[[f'Somme_seuils_{seuils_sans_slash}_method_{method}']] #todo : ne sert a rien de rajouter ligne a france_binching ? on pourrait direct dire bunching = = france_bunching_cut.sum(axis=1) ?
         
         nb_dpe = get_nb_dpe(old_built_filter,list(etiquette_ep_seuils.keys()))
         nb_dpe = {k.code:v for k,v in nb_dpe.items()}
@@ -178,7 +165,7 @@ def main():
         bunching = bunching.join(nb_dpe_df)
         
         # Vecteur des paramètres
-        variables = df_tension_immob_dep
+        variables = df_tension_immob_dep # todo : dire direct variables=tension_immob_dep() ?
         variables = sm.add_constant(variables)
         
         # variables_list = ['part_A','part_Abis','part_B1','part_B2','part_C']
@@ -196,7 +183,7 @@ def main():
         bunching['zcl_H3'] = (bunching.zcl == 'H3').map(int)
         bunching['density_diagnostiqueurs_dep'] = bunching.nb_diagnostiqueurs_dep/bunching.total_logements
         
-        # ajout de l'inverse du nombre de logements
+        # ajout du log du nombre de logements
         bunching['log_total_logements'] = np.log(bunching.total_logements)
         
         bunching = bunching[[f'Somme_seuils_{seuils_sans_slash}_method_{method}','const']+variables_list].dropna()
@@ -215,15 +202,15 @@ def main():
         # print(results.summary().as_latex())
         
         
-        p = sns.pairplot(data= bunching[[f'Somme_seuils_{seuils_sans_slash}_method_{method}']+variables_list])
+        p = sns.pairplot(data= bunching_test[[f'Somme_seuils_{seuils_sans_slash}_method_{method}']+variables_list])
         p.fig.suptitle(f"Corrélation entre le bunching méthode {method} et d'autres variables, old_built_filter = {old_built_filter}")
         p.fig.subplots_adjust(top=0.96)
         
         if True :
             if old_built_filter:
-                save_path = os.path.join(output_folder,f'Pairplot_correlation_bunching_methode_{method}_old_built.png') 
+                save_path = os.path.join(output_folder,f'Pairplot_correlation_bunching_methode_{method}_{variables_list}_old_built.png') 
             else:
-                save_path = os.path.join(output_folder,f'Pairplot_correlation_bunching_methode_{method}.png') 
+                save_path = os.path.join(output_folder,f'Pairplot_correlation_bunching_methode_{method}_{variables_list}.png') 
             plt.savefig(save_path, bbox_inches='tight')
 
 

@@ -163,8 +163,7 @@ def filter_manipulated(dep_code, period = 30):
     df_epc_evolution['conso_diff'] =  df_epc_evolution.epc_cons_2 - df_epc_evolution.epc_cons_1
     df_epc_evolution['conso_diff_rel'] =  df_epc_evolution.conso_diff / ((df_epc_evolution.epc_cons_2 + df_epc_evolution.epc_cons_1)/2) *100
 
-
-    #df_epc_evolution = variable_diff(dep_code, df_epc_evolution, variable = 'surface',  plot_variable_evolution = False, ecart_relatif = True) #todo : attention car modif de variable_diff
+    # df_epc_evolution = variable_diff(df_epc_evolution, variable = 'surface')
 
     return df_epc_evolution   
 
@@ -196,7 +195,7 @@ def filter_manipulated_national(period):
 
 
 
-def variable_diff(national_scale, period, dep_code, variable = 'surface',  plot_variable_evolution = True, ecart_relatif = True): #todo : bizarre d'avoir dep_code ici ?
+def variable_diff(df_epc_evolution, variable = 'surface'): #todo : bizarre d'avoir dep_code ici ?
     """
     Ajoute des colonnes {variable}_diff et {variable}_diff_rel (différence relative à la moyenne des deux DPEs) au DataFrame df_epc_evolution, et peut également plot l'histogramme des variations de cette variable.
 
@@ -218,66 +217,82 @@ def variable_diff(national_scale, period, dep_code, variable = 'surface',  plot_
     df_epc_evolution : pandas DataFrame
         tableau avec deux colonnes {variable}_diff et {variable}_diff_rel en plus.
     """
+
+    df_epc_evolution[f'{variable}_diff'] =  df_epc_evolution[f"{variable}_2"] - df_epc_evolution[f"{variable}_1"]
+    df_epc_evolution[f'{variable}_diff_rel'] =  df_epc_evolution[f'{variable}_diff'] / ((df_epc_evolution[f"{variable}_1"]+df_epc_evolution[f"{variable}_2"])/2) *100  # écart relatif par rapport à la moyenne des variables entre les deux DPEs
+
+
+    return df_epc_evolution
+
+
+
+def plot_variable_diff(national_scale, period, dep_code='91', variable='surface', ecart_relatif = True):
+    
     if national_scale:
         df_epc_evolution = filter_manipulated_national(period)
     else:
         df_epc_evolution = filter_manipulated(dep_code, period)
         departement = Departement(dep_code)
-        
-    df_epc_evolution[f'{variable}_diff'] =  df_epc_evolution[f"{variable}_2"] - df_epc_evolution[f"{variable}_1"]
-    df_epc_evolution[f'{variable}_diff_rel'] =  df_epc_evolution[f'{variable}_diff'] / ((df_epc_evolution[f"{variable}_1"]+df_epc_evolution[f"{variable}_2"])/2) *100  # écart relatif par rapport à la moyenne des variables entre les deux DPEs
 
+    # Ajout des colonnes variable_diff
+    df_epc_evolution = variable_diff(df_epc_evolution, variable) 
 
-    if plot_variable_evolution:
-        fig, ax = plt.subplots(figsize=(5,5), dpi=300)
+    fig, ax = plt.subplots(figsize=(5,5), dpi=300)
+    
+    max_variable = int(max(np.abs(df_epc_evolution[f'{variable}_diff_rel'])))
+    bins_width = 1
+    bins= np.asarray(range(-max_variable//bins_width*bins_width, max_variable//bins_width*bins_width+1, bins_width))
+    bins = bins +bins_width/2
+    # bins = list()
+    
+    if ecart_relatif :
+        df_epc_evolution.hist(column=f'{variable}_diff_rel', ax=ax, bins=bins, grid=False, color='k')
         
-        if ecart_relatif :
-            df_epc_evolution.hist(column=f'{variable}_diff_rel', ax=ax, bins=300, color='k')
-            
-            if national_scale :
-                ax.set_title(f"Ensemble des départements, N={len(df_epc_evolution)}. period = {period} jours)") 
-            else :
-                ax.set_title(f"Ecart relatif de {variable} entre deux DPE successifs\n({departement.name} - {departement.code}, N={len(df_epc_evolution)})") # changer nom figure ?
-            ax.set_ylabel("Nombre d'observations")
-            ax.set_xlabel(f"Ecart de {variable} entre DPE successifs, en %")
-            
-            ax.set_xlim([-100,100])
-            
-        else:
-            df_epc_evolution.hist(column=f'{variable}_diff', ax=ax, bins=np.linspace(), color='k') # todo : mettre liste de valeur avec sequence, eventuellement utiliser seaborn, pour centre l'histogramme
-            if national_scale :
-                ax.set_title(f"Ensemble des départements, N={len(df_epc_evolution)}. period = {period} jours)")
-            else :
-                ax.set_title(f"Evolution de {variable} entre deux DPE successifs\n({departement.name} - {departement.code}, N={len(df_epc_evolution)})")
-            ax.set_ylabel("Nombre d'observations")
-            ax.set_xlabel(f"Différence de {variable} entre DPE successifs")
-            
-            ax.set_xlim([-100,100])
-
-        # Enregistrement de la figure
-        output_folder_hist_variations = os.path.join('output', '6. hist_variations_entre_DPE_successifs')
-        os.makedirs(output_folder_hist_variations, exist_ok=True)
-        existing_files = os.listdir(output_folder_hist_variations)
+        if national_scale :
+            ax.set_title(f"Ensemble des départements, N={len(df_epc_evolution)}. period = {period} jours)") 
+        else :
+            ax.set_title(f"Ecart relatif de {variable} entre deux DPE successifs\n({departement.name} - {departement.code}, N={len(df_epc_evolution)})") # changer nom figure ?
+        ax.set_ylabel("Nombre d'observations")
+        ax.set_xlabel(f"Ecart de {variable} entre DPE successifs, en %")
         
-        if ecart_relatif :
-            save_name = f'Ecart_relatif_surface_entre_DPE_successifs_dep{dep_code}.png'
-            
-        else:
-            save_name = f'Ecart_surface_entre_DPE_successifs_dep{dep_code}.png'
-        plt.savefig(os.path.join(output_folder_hist_variations,save_name), bbox_inches='tight')
-
+        ax.set_xlim([-100,100])
         
-        variable_manip_count_1 = len(df_epc_evolution[df_epc_evolution[f'{variable}_diff'] != 0])
-        variable_manip_count_1_percent = variable_manip_count_1 / len(df_epc_evolution) *100
-        print(f'Nombre de modifications de {variable} non nulles pour le département {dep_code} :', variable_manip_count_1, f'parmi N={len(df_epc_evolution)} ({variable_manip_count_1_percent:.1f} %)')
-         
-        if variable == 'surface':
-            surface_manip_count_2 = len(df_epc_evolution) - len(df_epc_evolution[(-1 < df_epc_evolution.surface_diff) & (df_epc_evolution.surface_diff < 1)])
-            surface_manip_count_2_percent = surface_manip_count_2 / len(df_epc_evolution) *100
-            print(f'Nombre de modifications de surface supérieures à +-1 m2 pour le département {dep_code} :', surface_manip_count_2, f'parmi N={len(df_epc_evolution)} ({surface_manip_count_2_percent:.1f} %)')
+    else:
+        df_epc_evolution.hist(column=f'{variable}_diff', ax=ax, bins=bins, grid=True, color='k') # todo : mettre liste de valeur avec sequence  bins=np.linspace(), , eventuellement utiliser seaborn, pour centre l'histogramme
+        if national_scale :
+            ax.set_title(f"Ensemble des départements, N={len(df_epc_evolution)}. period = {period} jours")
+        else :
+            ax.set_title(f"Evolution de {variable} entre deux DPE successifs\n({departement.name} - {departement.code}, N={len(df_epc_evolution)})")
+        ax.set_ylabel("Nombre d'observations")
+        ax.set_xlabel(f"Différence de {variable} entre DPE successifs")
+        
+        # ax.set_xlim([-100,100])
 
     
-    return df_epc_evolution
+    # Enregistrement de la figure
+    output_folder_hist_variations = os.path.join('output', '6. hist_variations_entre_DPE_successifs')
+    os.makedirs(output_folder_hist_variations, exist_ok=True)
+    existing_files = os.listdir(output_folder_hist_variations)
+    
+    if ecart_relatif :
+        save_name = f'Ecart_relatif_surface_entre_DPE_successifs_dep{dep_code}.png'
+        
+    else:
+        save_name = f'Ecart_surface_entre_DPE_successifs_dep{dep_code}.png'
+    plt.savefig(os.path.join(output_folder_hist_variations,save_name), bbox_inches='tight')
+
+    
+    variable_manip_count_1 = len(df_epc_evolution[df_epc_evolution[f'{variable}_diff'] != 0])
+    variable_manip_count_1_percent = variable_manip_count_1 / len(df_epc_evolution) *100
+    print(f'Nombre de modifications de {variable} non nulles pour le département {dep_code} :', variable_manip_count_1, f'parmi N={len(df_epc_evolution)} ({variable_manip_count_1_percent:.1f} %)')
+     
+    if variable == 'surface':
+        surface_manip_count_2 = len(df_epc_evolution) - len(df_epc_evolution[(-1 < df_epc_evolution.surface_diff) & (df_epc_evolution.surface_diff < 1)])
+        surface_manip_count_2_percent = surface_manip_count_2 / len(df_epc_evolution) *100
+        print(f'Nombre de modifications de surface supérieures à +-1 m2 pour le département {dep_code} :', surface_manip_count_2, f'parmi N={len(df_epc_evolution)} ({surface_manip_count_2_percent:.1f} %)')
+
+    
+    return 
 
 
 def plot_distrib_dpe_sucessifs(national_scale, period, dep_code='91', max_xlim =600):
@@ -289,8 +304,8 @@ def plot_distrib_dpe_sucessifs(national_scale, period, dep_code='91', max_xlim =
     
     bins = list(range(0,round(max(df_epc_evolution.epc_cons_1))))
     fig, ax = plt.subplots(figsize=(5,5), dpi=300)
-    df_epc_evolution.hist('epc_cons_1', bins=bins, ax=ax, label = 'Premiers DPE', color= 'r', alpha = 0.6)
-    df_epc_evolution.hist('epc_cons_2', bins=bins, ax=ax, label = 'Seconds DPE', color= 'blue', alpha = 0.4)
+    df_epc_evolution.hist('epc_cons_1', bins=bins, ax=ax, label = 'Premiers DPE', color= 'r', alpha = 0.6, grid=False)
+    df_epc_evolution.hist('epc_cons_2', bins=bins, ax=ax, label = 'Seconds DPE', color= 'blue', alpha = 0.6, grid=False)
     if national_scale:
         ax.set_title(f"Ensemble des départements sur {period} jours, N={len(df_epc_evolution)}")
     else:
@@ -299,7 +314,7 @@ def plot_distrib_dpe_sucessifs(national_scale, period, dep_code='91', max_xlim =
     ax.set_xlabel("Consommation annuelle en énergie primaire (kWh.m$^{-2}$)")
     ax.set_xticks(ticks=[int(x) for x in list(set(list(np.asarray(list(etiquette_ep_dict.values())).flatten()))) if not np.isinf(x)] + [max_xlim])
     ax.set_xlim(0, max_xlim)
-    plt.grid(True, alpha=0.3, zorder=-1)
+    # plt.grid(False, alpha=0.3, zorder=-1)
     plt.legend()
     plt.show()
     
@@ -435,7 +450,7 @@ def plot_gain_period_cumule(dep_code):
     return
 
 
-def dicts_dep_gain_moyen_etiquette(period, save_json):
+def dicts_dep_gain_moyen_etiquette(period, save_json=False):
     
     france = France()
     
@@ -466,8 +481,10 @@ def dicts_dep_gain_moyen_etiquette(period, save_json):
     plt.close()
     
     save = f'carte_gain_moyen_etiquette_sur_{period}_jours'
-    map_title = f"Gain moyen d'étiquette sur {period} jours"
-    draw_departement_map(dict_gain_moyen_etiquette, output_folder, save=save, map_title=map_title)
+    map_title ="Maisons individuelles"
+    cbar_label = f"Gain moyen d'étiquette sur {period} jours" # todo : pareil partout
+
+    draw_departement_map(dict_gain_moyen_etiquette, output_folder, save=save, map_title=map_title, cbar_label=cbar_label)
     plt.show()
     plt.close()
     
@@ -486,7 +503,7 @@ def dicts_dep_gain_moyen_etiquette(period, save_json):
 # %%
 
 
-def plot_heatmap(national_scale, dep_code, frequency, period = 30):
+def plot_heatmap(national_scale=True, dep_code=None, frequency=True, period = 20):
     """
     Formate un DataFrame de comparaison de DPE successifs en un DataFrame 2D comptant les évolutions entre classes.
 
@@ -541,7 +558,7 @@ def plot_heatmap(national_scale, dep_code, frequency, period = 30):
     cbar_ax.set_position([posn.x0+posn.width+0.02, posn.y0, 0.04, posn.height])
     
     if frequency:
-        ax = sns.heatmap(df_heatmap, ax=ax, vmin=0, vmax=25, annot=annot, fmt="", cmap='bone_r', cbar=True, cbar_ax=cbar_ax, cbar_kws={'label':'Percentage (%)'})
+        ax = sns.heatmap(df_heatmap, ax=ax, vmin=0, vmax=25, annot=annot, fmt="", cmap='bone_r', cbar=True, cbar_ax=cbar_ax, cbar_kws={'label':'Pourcentage (%)'})
     else:
         ax = sns.heatmap(df_heatmap, ax=ax, annot=annot, fmt="", cmap='bone_r', cbar_ax=cbar_ax,cbar=True,cbar_kws={'label':"Nombre d'observations"})
     
@@ -553,8 +570,8 @@ def plot_heatmap(national_scale, dep_code, frequency, period = 30):
         spine.set_visible(True)
     for spine in cbar_ax.spines.values():
         spine.set_visible(True)
-    ax.set_ylabel('Second EPC')
-    ax.set_xlabel('First EPC')
+    ax.set_ylabel('Second DPE')
+    ax.set_xlabel('Premier DPE')
     
     
     # Définition du chemin de sauvegarde des heatmap
@@ -1026,20 +1043,21 @@ def hist_champs_modifies(dep_code, period, filter_dpe = None, top_n = None):
     
     # Tracé histogramme (bar chart) des {top_n} champs les plus fréquemment modifiés
     # Titre figure : Champs les plus modifiés entre deux DPE successifs de moins de {period} jours\n{departement.name} - {departement.code}, N={len(df_epc_evolution)}
-    fig,ax = plt.subplots(figsize=(10, 5))                  
+    fig,ax = plt.subplots(figsize=(10, 2/10*len(counts_norm.head(top_n))))                  
     counts_norm.head(top_n).plot(kind='barh')
     if filter_dpe == 'better_dpe_only': 
-        fig.suptitle(f'DPE successifs améliorés en moins de {period} jours ({departement.name} - {departement.code}, N={len(df_epc_evolution)})\n ')
+        ax.set_title(f'DPE successifs améliorés en moins de {period} jours ({departement.name} - {departement.code}, N={len(df_epc_evolution)})\n ')
     elif filter_dpe == 'worse_dpe_only': # todo: changer titre car pas convaincue
-        fig.suptitle(f'DPE successifs empirés en moins de {period} jours ({departement.name} - {departement.code}, N={len(df_epc_evolution)})\n ')
+        ax.set_title(f'DPE successifs empirés en moins de {period} jours ({departement.name} - {departement.code}, N={len(df_epc_evolution)})\n ')
     else :   
-        fig.suptitle(f'{departement.name} - {departement.code}, N={len(df_epc_evolution)}. period = {period} jours') #, fontsize=10)
+        ax.set_title(f'{departement.name} - {departement.code}, N={len(df_epc_evolution)}. period = {period} jours') #, fontsize=10)
         # fig.suptitle(f'DPE successifs de moins de {period} jours ({departement.name} - {departement.code}, N={len(df_epc_evolution)})\n ') #, fontsize=10)
     ax.set_xlabel("Nombre d'occurrences (%)")
     ax.set_ylabel(None)
     ax.set_xlim(0, max(counts_norm)+5)
     for container in ax.containers:
         ax.bar_label(container, fmt= "%.1f", padding = 1)
+    ax.invert_yaxis()
     plt.tight_layout()
     
     
@@ -1065,18 +1083,22 @@ def hist_champs_modifies(dep_code, period, filter_dpe = None, top_n = None):
 
 
 
-def regplot_influence_variable(dep_code, variable, period, display_class, relatif):
+def regplot_influence_variable(dep_code, variable, period, display_class, relatif, non_zero_variation_only):
     # todo : regression sans prendre en compte variation de surface nulle ?
     
     departement = Departement(dep_code)
     df_epc_evolution = filter_manipulated(dep_code, period = period)    
-    variable_diff(dep_code, df_epc_evolution, variable = variable,  plot_variable_evolution = False)
+    
+    df_epc_evolution = variable_diff(df_epc_evolution, variable = variable)
+    
     # conso_5_usages_ep_m2_diff 
     # variable_diff = 
     
-    if display_class :
+    if non_zero_variation_only:
+        df_epc_evolution = df_epc_evolution[df_epc_evolution[f'{variable}_diff']!=0]
+    
+    if display_class : # pas très pertinent ?
         if relatif:
-            df_epc_evolution = df_epc_evolution[df_epc_evolution[f'{variable}_diff_rel']!=0]
             fig,ax = plt.subplots(figsize=(5,5), dpi=300)
             sns.regplot(data=df_epc_evolution, x="conso_diff_rel", y=f'{variable}_diff_rel', hue = 'second_epc', palette=etiquette_colors_dict, hue_order=list('ABCDEFG'), ax=ax) 
             ax.set_ylabel(f'Variation relative de {variable} (%)')
@@ -1092,24 +1114,28 @@ def regplot_influence_variable(dep_code, variable, period, display_class, relati
             
     else : 
         if relatif:
-            df_epc_evolution = df_epc_evolution[df_epc_evolution[f'{variable}_diff_rel']!=0]
             fig,ax = plt.subplots(figsize=(5,5), dpi=300)
-            sns.regplot(data=df_epc_evolution, x="conso_diff_rel", y=f'{variable}_diff_rel', fit_reg = False, ax=ax)
+            sns.regplot(data=df_epc_evolution, x="conso_diff_rel", y=f'{variable}_diff_rel', fit_reg=True, scatter_kws={'alpha':0.05}, ax=ax)
             ax.set_ylabel(f'Variation relative de {variable} (%)')
             ax.set_xlabel('Variation relative de conso_5_usages_ep_m2 (%)')
-            #plt.axis('equal')
+            ax.set_title(f'Ensemble des départements\nPériode de {period} jours, N={len(df_epc_evolution)}')
+
             lim = max(max(np.abs(plt.xlim())), max(np.abs(plt.ylim())))
-            # plt.ylim(-lim, lim)
-            # plt.xlim(-lim, lim) #todo 
-            ax.set_ylim(-150, 150)
+            ax.set_ylim(-lim, lim)
+            ax.set_xlim(-lim, lim) # todo 
+            ax.set_ylim(-150, 150) # pour pouvoir voir sur la pente quelle variable varie plus vite
             ax.set_xlim(-150, 150)
+            # ax.set_ylim(-40, 40) # pour pouvoir voir sur la pente quelle variable varie plus vite
+            # ax.set_xlim(-40, 40)
         
         else :
             fig,ax = plt.subplots(figsize=(5,5), dpi=300)
             sns.regplot(data=df_epc_evolution, x="conso_diff", y=f'{variable}_diff', ax=ax) 
             ax.set_ylabel(f'Variation de {variable}')
             ax.set_xlabel('Variation de conso_5_usages_ep_m2')
-    plt.title(f"Corrélation entre les variations de {variable} et de consommation annuelle en énergie primaire"+" (kWh.m$^{-2}$)\n"+ f"{departement.name} - {departement.code}, N={len(df_epc_evolution)}")
+
+    plt.title(f"{departement.name} - {departement.code}\nPériode de {period} jours, N={len(df_epc_evolution)}")
+    # plt.title(f"Corrélation entre les variations de {variable} et de consommation annuelle en énergie primaire"+" (kWh.m$^{-2}$)\n"+ f"{departement.name} - {departement.code}, N={len(df_epc_evolution)}")
     # plt.ylim(-200, 200)
     # plt.xlim(-400, 400)
     
@@ -1146,7 +1172,7 @@ def main():
     os.makedirs(output_folder, exist_ok=True)
     
     
-    dep_code = '85'
+    dep_code = '91'
     departement = Departement(dep_code)
     
     period = 20 # jours d'écart maximal entre deux DPE successifs
@@ -1213,10 +1239,6 @@ def main():
         save_name = 'sankey_diagram_evolution_dpe_successifs_{dep_code}'
         fig.savefig(save_name, bbox_inches="tight", dpi=150)
 
-
-    if True:
-        variable_diff(national_scale=True, period=period, dep_code='85', variable = 'epc_cons',  plot_variable_evolution = True, ecart_relatif = True)
-
     
     # Download DPE details
     if False: 
@@ -1243,9 +1265,9 @@ def main():
         #test= diff_dpe_data(dpe_id1, dpe_id2)
         
     # influence des variations d'une variable sur conso_5_usages_ep_m2
-    if False:
+    if True:
         variable = 'surface'
-        regplot_influence_variable(dep_code, variable, period = period, display_class=False, relatif=True)
+        regplot_influence_variable(dep_code=dep_code, variable=variable, period=period, display_class=False, relatif=True, non_zero_variation_only=True)
     
 
             
