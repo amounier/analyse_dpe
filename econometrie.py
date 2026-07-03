@@ -106,6 +106,20 @@ def get_nb_diagnostiqueur_dep(force = False):
 
 def get_nb_rp_loc(force = False):
     # Nombre de résidences principales occupées par locataires
+    save_name = 'base-cc-logement-2022_light.csv'
+    if save_name not in os.listdir(os.path.join('data','INSEE')) or force:
+        df_nb_rp_loc = pd.read_excel(os.path.join('data','INSEE','base-cc-logement-2022.xlsx'), usecols=['CODGEO', 'P22_RP_LOC','P22_RP'], skiprows=5)  # names = ['CODGEO', 'nb_rp_loc']
+        df_nb_rp_loc.set_index('CODGEO', inplace=True)
+        df_nb_rp_loc = df_nb_rp_loc[~df_nb_rp_loc.index.str.startswith('97')] # uniquement territoire hexagonal
+        df_nb_rp_loc = df_nb_rp_loc[~df_nb_rp_loc.index.str.startswith('20')] # hors corse (2A et 2B aggrégé)
+        df_nb_rp_loc['dep_code'] = [Departement(e[:2]).code for e in df_nb_rp_loc.index]
+        df_nb_rp_loc = df_nb_rp_loc.groupby('dep_code')[['P22_RP_LOC','P22_RP']].sum()
+        df_nb_rp_loc['ratio_RP_loc'] = df_nb_rp_loc.P22_RP_LOC/df_nb_rp_loc.P22_RP
+        df_nb_rp_loc.to_csv(os.path.join('data','INSEE',save_name))
+    
+    df_nb_rp_loc = pd.read_csv(os.path.join('data','INSEE',save_name)).set_index('dep_code')
+    return df_nb_rp_loc[['ratio_RP_loc']]
+    
     
 #%% ===========================================================================
 # script principal
@@ -143,13 +157,9 @@ def main():
         
         # Fixation des paramètres de mesure du bunching
         old_built_filter = True
-<<<<<<< HEAD
 
         # method='diff_simple'
         # method = 'diff_beta_cente_abs'
-=======
-        
->>>>>>> 0373a056b711fe31f6d20c01a3a5c90d08473a9b
         method='diff_moyenne'
         # method='AMP'
         
@@ -208,7 +218,7 @@ def main():
         # print(results.summary().as_latex())
         
         
-        p = sns.pairplot(data= bunching_test[[f'Somme_seuils_{seuils_sans_slash}_method_{method}']+variables_list])
+        p = sns.pairplot(data= bunching[[f'Somme_seuils_{seuils_sans_slash}_method_{method}']+variables_list])
         p.fig.suptitle(f"Corrélation entre le bunching méthode {method} et d'autres variables, old_built_filter = {old_built_filter}")
         p.fig.subplots_adjust(top=0.96)
         
