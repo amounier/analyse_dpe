@@ -24,9 +24,10 @@ import jsondiff as jd
 from jsondiff import diff
 import tqdm
 
-from utils import etiquette_colors_dict, etiquette_ep_dict
+from utils import etiquette_colors_dict, etiquette_ep_dict, etiquette_ep_seuils
 from administrative import Departement, France, draw_departement_map
 from download import get_bdnb
+#from distribution import cut_france_bunching # ne peux pas marcher car distribution a aussi besoin de manipulation_dpe
 
 
 def filter_bdnb_individual(dep_code, force):
@@ -143,12 +144,12 @@ def filter_manipulated(dep_code, period = 30):
                 consecutive_pairs.append({
                     'adresse_brut': group.iloc[i]['adresse_brut'],
                     'first_epc_id': group.iloc[i]['identifiant_dpe'],
-                    'first_epc_date': group.iloc[i]['date_etablissement_dpe'].strftime("%d %b %Y"), # todo : laisser en format date ?
+                    'epc_date_1': group.iloc[i]['date_etablissement_dpe'].strftime("%d %b %Y"), # todo : laisser en format date ?
                     'epc_cons_1': group.iloc[i]['conso_5_usages_ep_m2'],
                     'first_epc': group.iloc[i]['classe_bilan_dpe'],
                     'surface_1' : group.iloc[i]['surface_habitable_logement'],
                     'second_epc_id': group.iloc[i+1]['identifiant_dpe'],
-                    'second_epc_date': group.iloc[i+1]['date_etablissement_dpe'].strftime("%d %b %Y"),
+                    'epc_date_2': group.iloc[i+1]['date_etablissement_dpe'].strftime("%d %b %Y"),
                     'epc_cons_2': group.iloc[i+1]['conso_5_usages_ep_m2'],
                     'second_epc': group.iloc[i+1]['classe_bilan_dpe'],
                     'surface_2' : group.iloc[i+1]['surface_habitable_logement']
@@ -160,15 +161,17 @@ def filter_manipulated(dep_code, period = 30):
     
     # df_epc_evolution = df_epc_evolution.reset_index(drop=True) # pour nettoyer colonne inutile
     
-    df_epc_evolution['conso_diff'] =  df_epc_evolution.epc_cons_2 - df_epc_evolution.epc_cons_1
-    df_epc_evolution['conso_diff_rel'] =  df_epc_evolution.conso_diff / ((df_epc_evolution.epc_cons_2 + df_epc_evolution.epc_cons_1)/2) *100
+    # df_epc_evolution['conso_diff'] =  df_epc_evolution.epc_cons_2 - df_epc_evolution.epc_cons_1
+    # df_epc_evolution['conso_diff_rel'] =  df_epc_evolution.conso_diff / ((df_epc_evolution.epc_cons_2 + df_epc_evolution.epc_cons_1)/2) *100
+    # todo : a suppr car on a déjà ligne suivante
 
+    df_epc_evolution = variable_diff(df_epc_evolution, variable = 'epc_cons') 
     # df_epc_evolution = variable_diff(df_epc_evolution, variable = 'surface')
 
     return df_epc_evolution   
 
 
-def filter_manipulated_national(period):
+def filter_manipulated_national(period): # attention : prend du temps --> enregistrer les variables .spydata en local
     """
     Creation du DataFrame des DPE successifs sur l'ensemble des départements.
 
@@ -236,9 +239,27 @@ def plot_variable_diff(national_scale, period, dep_code='91', variable='surface'
 
     # Ajout des colonnes variable_diff
     df_epc_evolution = variable_diff(df_epc_evolution, variable) 
+    
+    # Calculs de statistiques générales
+    count_diff = len(df_epc_evolution[df_epc_evolution[f'{variable}_diff'] != 0])
+    diff_percent = count_diff / len(df_epc_evolution) *100
+    print(f'Nombre de modifications de {variable} non nulles pour le département {dep_code} :', count_diff, f'parmi N={len(df_epc_evolution)} ({diff_percent:.1f} %)')
+    
+    count_diff_neg = len(df_epc_evolution[df_epc_evolution[f'{variable}_diff'] < 0])
+    diff_neg_percent = count_diff_neg / len(df_epc_evolution) *100
+    
+    count_diff_pos = len(df_epc_evolution[df_epc_evolution[f'{variable}_diff'] > 0])
+    diff_pos_percent = count_diff_pos / len(df_epc_evolution) *100
+    
+    if variable == 'surface':
+        surface_manip_count_2 = len(df_epc_evolution) - len(df_epc_evolution[(-1 < df_epc_evolution.surface_diff) & (df_epc_evolution.surface_diff < 1)])
+        surface_manip_count_2_percent = surface_manip_count_2 / len(df_epc_evolution) *100
+        print(f'Nombre de modifications de surface supérieures à +-1 m2 pour le département {dep_code} :', surface_manip_count_2, f'parmi N={len(df_epc_evolution)} ({surface_manip_count_2_percent:.1f} %)')
+
 
     fig, ax = plt.subplots(figsize=(5,5), dpi=300)
     
+    # Définition des bins pour avoir histogramme centré en 0 
     max_variable = int(max(np.abs(df_epc_evolution[f'{variable}_diff_rel'])))
     bins_width = 1
     bins= np.asarray(range(-max_variable//bins_width*bins_width, max_variable//bins_width*bins_width+1, bins_width))
@@ -246,7 +267,7 @@ def plot_variable_diff(national_scale, period, dep_code='91', variable='surface'
     # bins = list()
     
     if ecart_relatif :
-        df_epc_evolution.hist(column=f'{variable}_diff_rel', ax=ax, bins=bins, grid=False, color='k')
+        df_epc_evolution.hist(column=f'{variable}_diff_rel', ax=ax, bins=bins, grid=False, color=plt.get_cmap('viridis')(0.4))
         
         if national_scale :
             ax.set_title(f"Ensemble des départements, N={len(df_epc_evolution)}. period = {period} jours)") 
@@ -256,18 +277,44 @@ def plot_variable_diff(national_scale, period, dep_code='91', variable='surface'
         ax.set_xlabel(f"Ecart de {variable} entre DPE successifs, en %")
         
         ax.set_xlim([-100,100])
+        ax.set_ylim(bottom=1)
         
     else:
-        df_epc_evolution.hist(column=f'{variable}_diff', ax=ax, bins=bins, grid=True, color='k') # todo : mettre liste de valeur avec sequence  bins=np.linspace(), , eventuellement utiliser seaborn, pour centre l'histogramme
+        df_epc_evolution.hist(column=f'{variable}_diff', ax=ax, bins=bins, grid=False, color='k') # todo : mettre liste de valeur avec sequence  bins=np.linspace(), , eventuellement utiliser seaborn, pour centre l'histogramme
         if national_scale :
             ax.set_title(f"Ensemble des départements, N={len(df_epc_evolution)}. period = {period} jours")
         else :
             ax.set_title(f"Evolution de {variable} entre deux DPE successifs\n({departement.name} - {departement.code}, N={len(df_epc_evolution)})")
         ax.set_ylabel("Nombre d'observations")
         ax.set_xlabel(f"Différence de {variable} entre DPE successifs")
+        ax.set_yscale('log')
         
-        # ax.set_xlim([-100,100])
+        ax.set_xlim([-max_variable,max_variable])
+        ax.set_ylim(bottom=1)
+    
+    ax.grid(alpha=0.3, zorder=-1)
+    ax.vlines(x=0, xmin=0, linewidth = 1, xmax=max_xlim, color='k', alpha=0.4, zorder=-1) #todo : modif
 
+    ax.annotate(f"1$^{{er}}$ > 2$^{{e}}$ : {diff_neg_percent:.1f} %", #todo : modif en fonction de si c'est relati ou pas
+        xy=(0.25, 0.7),
+        xycoords=ax.transAxes,
+        ha = 'center',
+        fontsize=10)
+    
+    # ax.annotate(f"DPE à {variable} stable : {len(df_epc_evolution[df_epc_evolution[f'{variable}_diff'] == 0])}", #f"DPE à variable inchangée : {100 - diff_percent:.1f} %",
+    #     xy = (0.45, 0.99),
+    #     xytext=(0.5, 0.9),
+    #     xycoords=ax.transAxes,
+    #     ha = 'center',
+    #     #arrowprops=dict(arrowstyle = "->"),
+    #     fontsize=10)
+    
+    ax.annotate(f"1$^{{er}}$ < 2$^{{e}}$ : {diff_pos_percent:.1f} %",
+        xy=(0.75, 0.7),
+        xycoords=ax.transAxes,
+        ha = 'center',
+        fontsize=10)
+            
     
     # Enregistrement de la figure
     output_folder_hist_variations = os.path.join('output', '6. hist_variations_entre_DPE_successifs')
@@ -281,15 +328,6 @@ def plot_variable_diff(national_scale, period, dep_code='91', variable='surface'
         save_name = f'Ecart_surface_entre_DPE_successifs_dep{dep_code}.png'
     plt.savefig(os.path.join(output_folder_hist_variations,save_name), bbox_inches='tight')
 
-    
-    variable_manip_count_1 = len(df_epc_evolution[df_epc_evolution[f'{variable}_diff'] != 0])
-    variable_manip_count_1_percent = variable_manip_count_1 / len(df_epc_evolution) *100
-    print(f'Nombre de modifications de {variable} non nulles pour le département {dep_code} :', variable_manip_count_1, f'parmi N={len(df_epc_evolution)} ({variable_manip_count_1_percent:.1f} %)')
-     
-    if variable == 'surface':
-        surface_manip_count_2 = len(df_epc_evolution) - len(df_epc_evolution[(-1 < df_epc_evolution.surface_diff) & (df_epc_evolution.surface_diff < 1)])
-        surface_manip_count_2_percent = surface_manip_count_2 / len(df_epc_evolution) *100
-        print(f'Nombre de modifications de surface supérieures à +-1 m2 pour le département {dep_code} :', surface_manip_count_2, f'parmi N={len(df_epc_evolution)} ({surface_manip_count_2_percent:.1f} %)')
 
     
     return 
@@ -321,83 +359,174 @@ def plot_distrib_dpe_sucessifs(national_scale, period, dep_code='91', max_xlim =
     return
 
 
+
 def formatage_dpe_successifs_data(df_epc_evolution, window_size):
-    
-    dpe_data = get_dpe_consumption(dep_code, old_built_filter=old_built_filter) # c'est ca qui prend du temps
-    dpe_data = dpe_data.dropna()
-    dpe_data = dpe_data.map(round)
-    counter_dict = dict(dpe_data.conso_5_usages_ep_m2.value_counts())
-    counter_dict_sorted = {k: v for k, v in sorted(counter_dict.items(), key=lambda item: item[0])}
-    counter_df_sorted = pd.DataFrame(list(counter_dict_sorted.items()), columns=["conso_5_usages_ep_m2_arrondie","nb_observations"]) # df trié par conso_ep (besoin d'un DataFrame pour utiliser rolling)
-    
-    # print('counter_df_sorted \n', counter_df_sorted)
-    
-    # tracé des données à fit
-    # plt.plot(list(counter_dict_sorted.keys()), list(counter_dict_sorted.values()), "k", label='données', linewidth = 0.5)
-    
-    # calcul de la moyenne glissante des premier DPE
-    rolling_dpe = counter_df_sorted['nb_observations_1'].rolling(window=window_size, min_periods=1, center=True) 
-    counter_df_sorted["nb_obs_moyenne_1"] = rolling_dpe.mean()  # ajout colonne moyenne dans le DataFrame
-    
-    # calcul de la moyenne/médiane glissante des second DPE
-    rolling_dpe = counter_df_sorted['nb_observations_2'].rolling(window=window_size, min_periods=1, center=True) 
-    counter_df_sorted["nb_obs_moyenne_2"] = rolling_dpe.mean()  # ajout colonne moyenne dans le DataFrame
-    
-    
-    #pd.options.display.max_columns = None
-    #print('counter_df_sorted pimpé \n', counter_df_sorted)
-    
-    return counter_df_sorted
+    """
+    Création d'un DataFrame df_dpe_successifs permettant de calculer le bunching des deux distributions par la suite.
 
+    Parameters
+    ----------
+    df_epc_evolution : TYPE
+        DESCRIPTION.
+    window_size : TYPE
+        DESCRIPTION.
 
-    
-
-def calcul_bunching_dpe_successifs(df_epc_evolution):
-    if national_scale:
-        df_epc_evolution = filter_manipulated_national(period)
-    else:
-        df_epc_evolution = filter_manipulated(dep_code, period)
-        departement = Departement(dep_code)
+    Returns
+    -------
+    df_dpe_successifs : pandas DataFrame
+        DESCRIPTION.
+    """
+    nb_dpe = len(df_epc_evolution)
     
     # Initialisation d'un dataframe des conso_5_usages
-    max_epc_cons = max(df_epc_evolution['epc_cons_1'].max(),df_epc_evolution['epc_cons_2'].max())
-    # df_dpe_successifs = pd.DataFrame(data=np.arange(0,max_epc_cons+1, dtype=int), columns=['conso_5_usages_ep_m2'])
-    
-    df_dpe_successifs = pd.DataFrame(index=np.arange(0, int(max_epc_cons) + 1)) #, columns=['conso_5_usages_ep_m2'])
+    max_epc_cons = max(df_epc_evolution['epc_cons_1'].max(),df_epc_evolution['epc_cons_2'].max())    
+    df_dpe_successifs = pd.DataFrame(index=np.arange(0, int(max_epc_cons) + 1))
     df_dpe_successifs.rename_axis('conso_5_usages_ep_m2', inplace=True)
 
-    
     # Dictionnaires du nombre de DPE par valeur de conso_5_usages
     count_epc_cons_1 = df_epc_evolution.epc_cons_1.map(round).value_counts()
-    df_dpe_successifs = df_dpe_successifs.join(count_epc_cons_1) #, on='epc_cons_1')
-    # counter_dict_1 = dict(df_epc_evolution.epc_cons_1.map(round).value_counts())
-    # counter_dict_sorted_1 = {k: v for k, v in sorted(counter_dict_1.items(), key=lambda item: item[0])}
-    
+    count_epc_cons_1 = df_dpe_successifs.join(count_epc_cons_1)
+    count_epc_cons_1.rename(columns={"count": "count_epc_cons_1"}, inplace=True)
+
     count_epc_cons_2 = df_epc_evolution.epc_cons_2.map(round).value_counts()
-    df_dpe_successifs = df_dpe_successifs.join(count_epc_cons_2)
+    count_epc_cons_2 = df_dpe_successifs.join(count_epc_cons_2)
+    count_epc_cons_2.rename(columns={"count": "count_epc_cons_2"}, inplace=True)
 
-    # counter_dict_2 = dict(df_epc_evolution.epc_cons_2.map(round).value_counts())
-    # counter_dict_sorted_2 = {k: v for k, v in sorted(counter_dict_2.items(), key=lambda item: item[0])}
-
+    df_dpe_successifs = count_epc_cons_1.join(count_epc_cons_2)
     df_dpe_successifs = df_dpe_successifs.fillna(0)
     
-    # 1. Définir la plage de consommation cible
-    # max_epc_cons = df_epc_evolution['epc_cons_1'].max()
-    df_dpe_successifs = pd.DataFrame(index=np.arange(0, int(max_epc_cons) + 1), columns=['conso_5_usages_ep_m2'])
-    df_dpe_successifs.index.name = 'conso_5_usages_ep_m2'
+    # Différence des deux distributions
+    df_dpe_successifs['diff_distrib_dpe_sucessifs'] = df_dpe_successifs.count_epc_cons_2 - df_dpe_successifs.count_epc_cons_1 
     
-    # 2. Préparer le décompte pour l'alignement
-    # On arrondit, on compte les occurrences, et on crée un Series indexé par la consommation
-    counts = df_epc_evolution['epc_cons_1'].round().value_counts()
+    # Moyenne glissante de chacune des distribution
+    rolling_dpe = df_dpe_successifs['count_epc_cons_1'].rolling(window=window_size, min_periods=1, center=True) 
+    df_dpe_successifs["moyenne_distrib_1"] = rolling_dpe.mean()  
     
-    # 3. Joindre le décompte au dataframe cible
-    # L'index de 'counts' (conso arrondie) correspond à l'index de 'df_dpe_successifs'
-    df_dpe_successifs = df_dpe_successifs.join(counts)
+    rolling_dpe = df_dpe_successifs['count_epc_cons_2'].rolling(window=window_size, min_periods=1, center=True) 
+    df_dpe_successifs["moyenne_distrib_2"] = rolling_dpe.mean()  
     
-    # Optionnel : Remplacer les NaN (valeurs de conso absentes dans les données) par 0
-    df_dpe_successifs = df_dpe_successifs.fillna(0)
+    # Normalisation par nb total de DPE
+    df_dpe_successifs['y_diff_moyenne_norm_1'] = (df_dpe_successifs.count_epc_cons_1 - df_dpe_successifs.moyenne_distrib_1)/nb_dpe 
+    df_dpe_successifs['y_diff_moyenne_norm_abs_1'] = df_dpe_successifs['y_diff_moyenne_norm_1'].abs() 
+    df_dpe_successifs['y_diff_moyenne_norm_2'] = (df_dpe_successifs.count_epc_cons_2 - df_dpe_successifs.moyenne_distrib_2)/nb_dpe 
+    df_dpe_successifs['y_diff_moyenne_norm_abs_2'] = df_dpe_successifs['y_diff_moyenne_norm_2'].abs() 
 
+    
     return df_dpe_successifs
+
+
+
+def plot_diff_distrib_dpe_successifs(period, max_xlim=600): # echelle nationale
+    
+    df_epc_evolution = filter_manipulated_national(period)
+    df_dpe_successifs = formatage_dpe_successifs_data(df_epc_evolution)
+    
+    fig, ax = plt.subplots(figsize=(5,5), dpi=300)
+    # ax.plot(df_dpe_successifs.index, df_dpe_successifs.diff_distrib_dpe_sucessifs, color=plt.get_cmap('viridis')(0.1), linewidth = 0.7)
+    
+    ax.plot(df_dpe_successifs.index, df_dpe_successifs.count_epc_cons_1, color=plt.get_cmap('viridis')(0.1), linewidth = 0.7, label = 'premiers DPE')
+    ax.plot(df_dpe_successifs.index, df_dpe_successifs.moyenne_distrib_1,"k", label='moyenne', linewidth = 1)
+
+    
+    # ax.plot(df_dpe_successifs.index, df_dpe_successifs.count_epc_cons_2, color=plt.get_cmap('viridis')(0.1), linewidth = 0.7, label = 'seconds DPE')
+    # ax.plot(df_dpe_successifs.index, df_dpe_successifs.moyenne_distrib_2,"k", label='moyenne', linewidth = 1)
+
+    
+    ax.set_xlim([0,max_xlim])
+    ax.set_ylim([0,800])
+
+    # ax.hlines(y=0, xmin=0, linewidth = 1, xmax=max_xlim, color='k', alpha=0.4, zorder=-1) # tracé de l'axe y=0 en arrière-plan
+    ax.set_ylabel("Nombre de DPE de différence")
+    ax.set_xlabel("Consommation annuelle en énergie primaire (kWh.m$^{-2}$)")
+    ax.set_xticks(ticks=[int(x) for x in list(set(list(np.asarray(list(etiquette_ep_dict.values())).flatten()))) if not np.isinf(x)] + [max_xlim])
+    ax.set_title(f"Ensemble des départements sur {period} jours, N={len(df_epc_evolution)}")
+    plt.legend()     
+    
+    # # Définition du chemin de sauvegarde des histogrammes des champs modifiés
+    # output_folder = os.path.join('output', '') #todo : modifier
+    # os.makedirs(output_folder, exist_ok=True)
+
+    # # Enregistrement de la figure
+    # save_path = os.path.join(output_folder,f'diff_distrib_dpe_successifs.png')
+    # plt.savefig(save_path, bbox_inches='tight')
+    plt.show()
+    plt.close()
+    
+    return
+
+
+
+
+def calcul_bunching_dpe_successifs(df_epc_evolution, seuils, itv_bunching, window_size):
+    
+    df_dpe_successifs = formatage_dpe_successifs_data(df_epc_evolution, window_size=window_size)
+    
+    # méthode différence simple (utilisée par Civel et al. 2025)
+    
+    method ='diff_simple'
+    
+    bunching_dpe_succ = pd.DataFrame(index=[0]) # initialisation d'un DataFrame
+    
+    bunching = 0
+    
+    for seuil in seuils:
+        valeur_seuil = etiquette_ep_seuils[seuil]
+        print(bunching_dpe_succ)
+        
+        nb_gauche = df_dpe_successifs[(df_dpe_successifs.index > valeur_seuil-itv_bunching) & (df_dpe_successifs.index <= valeur_seuil)].sum()
+        nb_droite = df_dpe_successifs[(df_dpe_successifs.index > valeur_seuil) & (df_dpe_successifs.index <= valeur_seuil+itv_bunching)].sum() # todo : pb il faut dire quelle colonne
+
+        diff_simple = (nb_gauche - nb_droite) / (nb_gauche+nb_droite) 
+        bunching += diff_simple
+
+        bunching_dpe_succ['diff_simple'] += diff_simple
+        
+        
+    method ='diff_moyenne'
+      
+# =============================================================================
+#     # Initialisation des DataFrame
+#     bunching_df = pd.DataFrame(index=['Premier DPE','Second DPE'])
+#     # bunching_df_2 = pd.DataFrame(index=[0]) 
+#     
+#     for k, seuil in etiquette_ep_seuils.items():
+#         # Création d'un DataFrame filtré sur l'intervalle à +-{itv_bunching} du seuil
+#         df_dpe_successifs_filtered = df_dpe_successifs[(df_dpe_successifs.index  > seuil-itv_bunching) & (df_dpe_successifs.index <= seuil + itv_bunching)]
+#         
+#         # Ajout d'une colonne correspondante au seuil dans le bunching DataFrame 
+#         bunching_df[1][f'{k}_method_{method}'] = df_dpe_successifs_filtered['y_diff_moyenne_norm_abs_1'].sum() 
+#         bunching_df_2[f'{k}_method_{method}'] = df_dpe_successifs_filtered['y_diff_moyenne_norm_abs_2'].sum() 
+# 
+#     bunching_df_cut, seuils_sans_slash = cut_france_bunching(bunching_df, seuils)
+#     
+# =============================================================================
+    
+    # Initialisation des DataFrame
+    bunching_df_1 = pd.DataFrame(index=[0])
+    bunching_df_2 = pd.DataFrame(index=[0]) 
+    
+    for k, seuil in etiquette_ep_seuils.items():
+        # Création d'un DataFrame filtré sur l'intervalle à +-{itv_bunching} du seuil
+        df_dpe_successifs_filtered = df_dpe_successifs[(df_dpe_successifs.index  > seuil-itv_bunching) & (df_dpe_successifs.index <= seuil + itv_bunching)]
+        
+        # Ajout d'une colonne correspondante au seuil dans le bunching DataFrame 
+        bunching_df_1[f'{k}_method_{method}'] = df_dpe_successifs_filtered['y_diff_moyenne_norm_abs_1'].sum() 
+        bunching_df_2[f'{k}_method_{method}'] = df_dpe_successifs_filtered['y_diff_moyenne_norm_abs_2'].sum() 
+
+    # bunching_df_1[:, [3:6]]
+    bunching_df_cut_1, seuils_sans_slash = cut_france_bunching(bunching_df_1, seuils)
+    bunching_premier_dpe = bunching_df_cut_1.iloc[0].sum() #axis=1) 
+    bunching_df_cut_2, seuils_sans_slash = cut_france_bunching(bunching_df_2, seuils)
+    bunching_second_dpe = bunching_df_cut_2.iloc[0].sum()
+
+    print('Bunching méthode diff_moyenne sur la distribution des premier DPE :', bunching_premier_dpe)
+    print('Bunching méthode diff_moyenne sur la distribution des second DPE :', bunching_second_dpe)
+
+    pourcent_variation_bunching = (bunching_second_dpe - bunching_premier_dpe)/ bunching_premier_dpe *100
+    print(f'Augmentation du bunching de {pourcent_variation_bunching:.2f} %')
+    
+    return
+
 
 # =============================================================================
 # NE SERT A RIEN CAR ON A DEJA PLOT VARIABLE DIFF 
@@ -424,7 +553,7 @@ def plot_gain_period(national_scale, dep_code='91', period_max=120, bins_size = 
         df_epc_evolution = filter_manipulated(dep_code, period_max)
         departement = Departement(dep_code)
     
-    df_epc_evolution['ecart_date'] = pd.to_datetime(df_epc_evolution.second_epc_date, format="%d %b %Y") - pd.to_datetime(df_epc_evolution.first_epc_date, format="%d %b %Y")
+    df_epc_evolution['ecart_date'] = pd.to_datetime(df_epc_evolution.epc_date_2, format="%d %b %Y") - pd.to_datetime(df_epc_evolution.epc_date_1, format="%d %b %Y")
     df_epc_evolution['ecart_date'] = df_epc_evolution['ecart_date'].dt.days
     # Calcul du gain moyen d'étiquette sur l'ensemble des paires de DPEs successifs
     epc_order = {'A':7, 'B': 6, 'C': 5, 'D': 4, 'E': 3, 'F': 2, 'G': 1} # on attribue valeur à chaque classe
@@ -644,9 +773,9 @@ def plot_heatmap(national_scale=True, dep_code=None, frequency=True, period = 20
         ax = sns.heatmap(df_heatmap, ax=ax, annot=annot, fmt="", cmap='bone_r', cbar_ax=cbar_ax,cbar=True,cbar_kws={'label':"Nombre d'observations"})
     
     if national_scale : 
-        ax.set_title(f'Ensemble des départements\nPériode de {period} jours, N={len(df_epc_evolution)}')
+        ax.set_title(f'Logements individuels, ensemble des départements\nPériode de {period} jours, N={len(df_epc_evolution)}')
     else : 
-        ax.set_title(f'{departement.name} - {departement.code}\nPériode de {period} jours, N={len(df_epc_evolution)}')
+        ax.set_title(f'Logements individuels, {departement.name} - {departement.code}\nPériode de {period} jours, N={len(df_epc_evolution)}')
     for spine in ax.spines.values():
         spine.set_visible(True)
     for spine in cbar_ax.spines.values():
@@ -1181,7 +1310,7 @@ def regplot_influence_variable(dep_code, variable, period, display_class, relati
     if display_class : # pas très pertinent ?
         if relatif:
             fig,ax = plt.subplots(figsize=(5,5), dpi=300)
-            sns.regplot(data=df_epc_evolution, x="conso_diff_rel", y=f'{variable}_diff_rel', hue = 'second_epc', palette=etiquette_colors_dict, hue_order=list('ABCDEFG'), ax=ax) 
+            sns.regplot(data=df_epc_evolution, x="epc_cons_diff_rel", y=f'{variable}_diff_rel', hue = 'second_epc', palette=etiquette_colors_dict, hue_order=list('ABCDEFG'), ax=ax) 
             ax.set_ylabel(f'Variation relative de {variable} (%)')
             ax.set_label('Variation relative de conso_5_usages_ep_m2 (%)')
             ax.set_ylim(-150, 150)
@@ -1189,14 +1318,14 @@ def regplot_influence_variable(dep_code, variable, period, display_class, relati
         
         else :
             fig,ax = plt.subplots(figsize=(5,5), dpi=300)
-            sns.regplot(data=df_epc_evolution, x="conso_diff", y=f'{variable}_diff', hue = 'second_epc', palette=etiquette_colors_dict, hue_order=list('ABCDEFG'), ax=ax) 
+            sns.regplot(data=df_epc_evolution, x="epc_cons_diff", y=f'{variable}_diff', hue = 'second_epc', palette=etiquette_colors_dict, hue_order=list('ABCDEFG'), ax=ax) 
             ax.set_ylabel(f'Variation de {variable}')
             ax.set_xlabel('Variation de conso_5_usages_ep_m2')
             
     else : 
         if relatif:
             fig,ax = plt.subplots(figsize=(5,5), dpi=300)
-            sns.regplot(data=df_epc_evolution, x="conso_diff_rel", y=f'{variable}_diff_rel', fit_reg=True, scatter_kws={'alpha':0.05}, ax=ax)
+            sns.regplot(data=df_epc_evolution, x="epc_cons_diff_rel", y=f'{variable}_diff_rel', fit_reg=True, scatter_kws={'alpha':0.05}, ax=ax)
             ax.set_ylabel(f'Variation relative de {variable} (%)')
             ax.set_xlabel('Variation relative de conso_5_usages_ep_m2 (%)')
             ax.set_title(f'Ensemble des départements\nPériode de {period} jours, N={len(df_epc_evolution)}')
@@ -1211,7 +1340,7 @@ def regplot_influence_variable(dep_code, variable, period, display_class, relati
         
         else :
             fig,ax = plt.subplots(figsize=(5,5), dpi=300)
-            sns.regplot(data=df_epc_evolution, x="conso_diff", y=f'{variable}_diff', ax=ax) 
+            sns.regplot(data=df_epc_evolution, x="epc_cons_diff", y=f'{variable}_diff', ax=ax) 
             ax.set_ylabel(f'Variation de {variable}')
             ax.set_xlabel('Variation de conso_5_usages_ep_m2')
 

@@ -311,8 +311,8 @@ def plot_dpe_distribution(path, dep_code, save, plot_mean, plot_median, window_s
         color = etiquette_colors_dict.get(eti)
         counter_dict_eti = {k:v for k,v in counter_dict_sorted.items() if k > inf_ep and k <= sup_ep}
         ax.bar(list(counter_dict_eti.keys()), list(counter_dict_eti.values()), width=1., color=color, label=eti)
-        # plt.vlines(320, 0, counter_dict_sorted[320], color='k', linestyles='dashed')  # pour illustration méthode AMP 
-        # plt.vlines(340, 0, counter_dict_sorted[340], color='k', linestyles='dashed')  # pour illustration méthode AMP
+        # plt.vlines(320, 0, counter_dict_sorted[320], color='k', linestyles='dashed')  # pour illustration méthode diff_simple 
+        # plt.vlines(340, 0, counter_dict_sorted[340], color='k', linestyles='dashed')  # pour illustration méthode diff_simple
         
     ax.set_xlim([0,max_xlim])
     fig.suptitle(f"{departement.name} - {departement.code}")
@@ -346,8 +346,8 @@ def plot_dpe_distribution(path, dep_code, save, plot_mean, plot_median, window_s
         pdf = fit_dpe_data_df['y_beta_curve_fit']
         ax.plot(x_data, pdf*nb_dpe_filtre, "k--", label=f'curve_fit\n(R$^{{2}}$={r2_value:.2f})')
   
-    # ax.set_xlim([310,350]) # pour illustration méthode AMP
-    # ax.set_ylim([0,260]) # pour illustration méthode AMP
+    # ax.set_xlim([310,350]) # pour illustration méthode diff_simple
+    # ax.set_ylim([0,260]) # pour illustration méthode diff_simple
     ax.legend()    
 
     # Enregistrement de la figure
@@ -375,11 +375,11 @@ def calcul_bunching(dep_code, method, itv_bunching, window_size, plot_ecart, pat
     ----------
     dep_code : str
         code du departement.
-    method : str ('AMP' ou 'AMP_nb_dpe' ou 'diff_beta_gauche' ou 'diff_beta_centre_abs' ou 'diff_moyenne' ou'diff_moyenne_classes' ou 'diff_moyenne_gauche_itv')
+    method : str ('diff_simple' ou 'diff_simple_nb_dpe' ou 'diff_beta_gauche' ou 'diff_beta_centre_abs' ou 'diff_moyenne' ou'diff_moyenne_classes' ou 'diff_moyenne_gauche_itv')
         nom de la méthode utilisée pour calculer le bunching.
     itv_bunching : int
         Attention : l'intervalle peut être soit à gauche du seuil, soit de part et d'autre du seuil selon les méthodes. 
-        Methodes 'AMP' et 'AMP_nb_dpe' : taille de l'intervalle de part et d'autre des seuils sur lequel on calcule le bunching. 
+        Methodes 'diff_simple' et 'diff_simple_nb_dpe' : taille de l'intervalle de part et d'autre des seuils sur lequel on calcule le bunching. 
         Methode 'diff_beta_gauche' : taille de l'intervalle à gauche de chaque seuil (utiliser plutôt 10 kWh/m2 comme Aja et al.).
         Methode 'diff_beta_centre_abs' : taille de l'intervalle de part et d'autre des seuils.
         Methodes 'diff_moyenne' et 'diff_moyenne_classes' : taille de l'intervalle de part et d'autre des seuils
@@ -411,10 +411,8 @@ def calcul_bunching(dep_code, method, itv_bunching, window_size, plot_ecart, pat
     counter_dict = dict(dpe_data.conso_5_usages_ep_m2.value_counts())
     counter_dict_sorted = {k: v for k, v in sorted(counter_dict.items(), key=lambda item: item[0])}
     
-    pd.options.display.max_columns = Nonerange(0,max_epc_cons)
     
-    
-    if method=='AMP': # méthode "Average Manipulation Density" (Civel et al.).
+    if method=='diff_simple': # méthode différence simple (utilisée par Civel et al. 2025)
         
         bunching_df = pd.DataFrame(index=[0]) # initialisation d'un DataFrame
         
@@ -426,10 +424,10 @@ def calcul_bunching(dep_code, method, itv_bunching, window_size, plot_ecart, pat
                 print(f'nb_gauche_{k}', nb_gauche)
                 print(f'nb_droite_{k}', nb_droite)
 
-            AMP = (nb_gauche - nb_droite) / (nb_gauche+nb_droite)  # average manipulation density autour du seuil 
+            diff_simple = (nb_gauche - nb_droite) / (nb_gauche+nb_droite)  # différence simple autour du seuil 
          
             # Ajout d'une colonne correspondante au seuil dans le bunching DataFrame 
-            bunching_df[f'{k}_method_{method}'] = AMP
+            bunching_df[f'{k}_method_{method}'] = diff_simple
             
         print(f'Bunching (méthode {method}) pour {departement}, avec un intervalle de +-{itv_bunching} kWh/m2 autour des seuils, old_built_filter = {old_built_filter} : \n', bunching_df)
 
@@ -437,7 +435,7 @@ def calcul_bunching(dep_code, method, itv_bunching, window_size, plot_ecart, pat
     
     
     
-    if method=='AMP_nb_dpe': # méthode "Average Manipulation Density" mais divisé par le nombe total de DPE (Aja et al.).
+    if method=='diff_simple_nb_dpe': # méthode différence simple, mais divisé par le nombe total de DPE (comme dans Aja et al.)
         
         bunching_df = pd.DataFrame(index=[0]) # initialisation d'un DataFrame
         
@@ -449,10 +447,10 @@ def calcul_bunching(dep_code, method, itv_bunching, window_size, plot_ecart, pat
                 print(f'nb_gauche_{k}', nb_gauche)
                 print(f'nb_droite_{k}', nb_droite)
 
-            AMP_nb_dpe = (nb_gauche - nb_droite) / nb_dpe  # average manipulation density autour du seuil mais on divise par nb tot DPE (comme Aja et al) 
+            diff_simple_nb_dpe = (nb_gauche - nb_droite) / nb_dpe  # différence simple autour du seuil mais on divise par nb tot DPE (comme Aja et al) 
          
             # Ajout d'une colonne correspondante au seuil dans le bunching DataFrame 
-            bunching_df[f'{k}_method_{method}'] = AMP_nb_dpe
+            bunching_df[f'{k}_method_{method}'] = diff_simple_nb_dpe
             
         print(f'Bunching (méthode {method}) pour {departement}, avec un intervalle de +-{itv_bunching} kWh/m2 autour des seuils, old_built_filter = {old_built_filter} : \n', bunching_df)
 
@@ -657,7 +655,7 @@ def calcul_bunching(dep_code, method, itv_bunching, window_size, plot_ecart, pat
 
 
 
-    if method =='diff_moyenne_gauche_itv': # difference entre les données et la moyenne glissante, normalisé par le nombre de DPE dans l'intervalle itv_bunching A GAUCHE du seuil étudié (nb_dpe_itv) = idem que pour méthode AMP Civet et al.
+    if method =='diff_moyenne_gauche_itv': # difference entre les données et la moyenne glissante, normalisé par le nombre de DPE dans l'intervalle itv_bunching A GAUCHE du seuil étudié (nb_dpe_itv) = idem que pour méthode diff_simple Civet et al.
         
         dpe_data_df = formatage_dpe_data(dep_code=dep_code, window_size=window_size, old_built_filter=old_built_filter)  # moyenne glissante sur une fenêtre de taille window_size
         
@@ -734,11 +732,11 @@ def calcul_bunching_france(path, method, itv_bunching, window_size, old_built_fi
     ----------
     path : str
         Chemin de sauvegarde des FIGURES issues de calcul_bunching (écart données/fit) (et pas du dictionnaire bunching). N'est pas utile en pratique car par défaut, plot_ecart=False.
-    method : str ('AMP' ou 'AMP_nb_dpe' ou 'diff_beta_gauche' ou 'diff_beta_centre_abs' ou 'diff_moyenne' ou'diff_moyenne_classes' ou 'diff_moyenne_gauche_itv')
+    method : str ('diff_simple' ou 'diff_simple_nb_dpe' ou 'diff_beta_gauche' ou 'diff_beta_centre_abs' ou 'diff_moyenne' ou'diff_moyenne_classes' ou 'diff_moyenne_gauche_itv')
         Nom de la méthode utilisée pour calculer le bunching.
     itv_bunching : int
         Attention : l'intervalle peut être soit à gauche du seuil, soit de part et d'autre du seuil selon les méthodes. 
-        Methodes 'AMP' et 'AMP_nb_dpe': taille de l'intervalle de part et d'autre des seuils sur lequel on calcule le bunching. 
+        Methodes 'diff_simple' et 'diff_simple_nb_dpe': taille de l'intervalle de part et d'autre des seuils sur lequel on calcule le bunching. 
         Methode 'diff_beta_gauche' : taille de l'intervalle à gauche de chaque seuil (utiliser plutôt 10 kWh/m2 comme Aja et al.).
         Methode 'diff_beta_centre_abs' : taille de l'intervalle de part et d'autre des seuils.
         Methodes 'diff_moyenne' et 'diff_moyenne_classes' : taille de l'intervalle de part et d'autre des seuils
@@ -882,7 +880,7 @@ def calcul_nb_dpe_filtre(old_built_filter):
     for dep in france.departements :
         dep_code = dep.code
         print(dep)
-        _, _, _, nb_dpe_filtre = fit_dpe_data(dep_code, method='curve_fit', old_built_filter=old_built_filter)  # attention : si on utilisé méthode AMP ou diff_moyenne, pas forcément pertinent de filtrer
+        _, _, _, nb_dpe_filtre = fit_dpe_data(dep_code, method='curve_fit', old_built_filter=old_built_filter)  # attention : si on utilisé méthode diff_simple ou diff_moyenne, pas forcément pertinent de filtrer
         dict_dep_nb_dpe_filtre[dep] = nb_dpe_filtre 
     
     return dict_dep_nb_dpe_filtre 
@@ -955,7 +953,7 @@ def df_compare_methods(seuils, methods, path, old_built_filter, itv_bunching=10,
     -------
     df_compare : pandas DataFrame
         Bunching par départements selon différentes méthodes de calcul
-        Colonnes : dep_code (index)  |  département  |  nb_dpe_filtre  |  Méthode AMP  |  Méthode AMP_nb_dpe  |  Méthode diff_beta_centre_abs  |  Méthode diff_moyenne  |  Méthode diff_moyenne_classes  |  Méthode diff_moyenne_gauche_itv  |  Méthode diff_beta_gauche
+        Colonnes : dep_code (index)  |  département  |  nb_dpe_filtre  |  Méthode diff_simple  |  Méthode diff_simple_nb_dpe  |  Méthode diff_beta_centre_abs  |  Méthode diff_moyenne  |  Méthode diff_moyenne_classes  |  Méthode diff_moyenne_gauche_itv  |  Méthode diff_beta_gauche
     """
     
     # Définition du chemin de sauvegarde des df_compare en .csv
@@ -987,17 +985,17 @@ def df_compare_methods(seuils, methods, path, old_built_filter, itv_bunching=10,
         
         #todo: remplacer par une boucle for method in methods:
         
-        # if 'AMP' in methods:
-        # Ajout d'une colonne méthode AMP
-        france_bunching = calcul_bunching_france(path, method='AMP', itv_bunching=itv_bunching, window_size = 50, old_built_filter=old_built_filter, max_xlim=600)
+        # if 'diff_simple' in methods:
+        # Ajout d'une colonne méthode diff_simple
+        france_bunching = calcul_bunching_france(path, method='diff_simple', itv_bunching=itv_bunching, window_size = 50, old_built_filter=old_built_filter, max_xlim=600)
         france_bunching_cut, seuils_sans_slash = cut_france_bunching(france_bunching, seuils)
-        df_compare['Méthode AMP'] = france_bunching_cut.sum(axis=1) # on somme sur les lignes des colonnes conservées
+        df_compare['Méthode diff_simple'] = france_bunching_cut.sum(axis=1) # on somme sur les lignes des colonnes conservées
 
-        # if 'AMP_nb_dpe' in methods:
-        # Ajout d'une colonne méthode AMP_nb_dpe
-        france_bunching = calcul_bunching_france(path, method='AMP_nb_dpe', itv_bunching=itv_bunching, window_size = 50, old_built_filter=old_built_filter, max_xlim=600)
+        # if 'diff_simple_nb_dpe' in methods:
+        # Ajout d'une colonne méthode diff_simple_nb_dpe
+        france_bunching = calcul_bunching_france(path, method='diff_simple_nb_dpe', itv_bunching=itv_bunching, window_size = 50, old_built_filter=old_built_filter, max_xlim=600)
         france_bunching_cut, seuils_sans_slash = cut_france_bunching(france_bunching, seuils)
-        df_compare['Méthode AMP_nb_dpe'] = france_bunching_cut.sum(axis=1) # on somme sur les lignes des colonnes conservées
+        df_compare['Méthode diff_simple_nb_dpe'] = france_bunching_cut.sum(axis=1) # on somme sur les lignes des colonnes conservées
                
         # if 'diff_beta_centre_abs' in methods:
         # Ajout d'une colonne méthode diff_beta_centre_abs
@@ -1078,8 +1076,8 @@ def main():
     # choix des paramètres de mesure du bunching
     # method='diff_beta_centre_abs'
     method='diff_moyenne'
-    # method = 'AMP_nb_dpe'
-    # method = 'AMP'
+    # method = 'diff_simple_nb_dpe'
+    # method = 'diff_simple'
     # itv_bunching = 5
     itv_bunching = 10
 
@@ -1285,7 +1283,7 @@ def main():
 
     if False : 
         seuils = ['D/E', 'E/F', 'F/G']
-        methods = ['AMP_nb_dpe', 'diff_moyenne', 'diff_beta_centre_abs']
+        methods = ['diff_simple_nb_dpe', 'diff_moyenne', 'diff_beta_centre_abs']
         # seuils = ['E/F']
         itv_bunching = 10
         # attention : dcp là on a le même itv_bunching pour toutes les méthodes !!
@@ -1329,7 +1327,7 @@ def main():
     
     if False : 
         seuils = ['D/E', 'E/F', 'F/G']
-        methods = ['AMP_nb_dpe', 'diff_moyenne', 'diff_beta_centre_abs']
+        methods = ['diff_simple_nb_dpe', 'diff_moyenne', 'diff_beta_centre_abs']
         itv_bunching = 10
         period = 20
         # attention : dcp là on a le même itv_bunching pour toutes les méthodes !!

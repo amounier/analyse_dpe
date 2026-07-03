@@ -151,7 +151,7 @@ def main():
         # Fixation des paramètres de mesure du bunching
         old_built_filter = True
 
-        # method='AMP'
+        # method='diff_simple'
         # method = 'diff_beta_cente_abs'
         method='diff_moyenne'
         
