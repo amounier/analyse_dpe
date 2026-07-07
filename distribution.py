@@ -25,6 +25,19 @@ from utils import etiquette_colors_dict,etiquette_ep_dict,etiquette_ep_seuils
 from manipulation_dpe import dicts_dep_gain_moyen_etiquette
 
 
+methods_dict = {'diff_simple':'différence simple',
+           'diff_simple_nb_dpe':'différence simple *',
+           'diff_beta_gauche': 'écart distribution bêta, gauche',
+           'diff_beta': 'écart distribution bêta',
+           'diff_beta_itv': 'écart distribution bêta *',
+           'diff_moyenne': 'écart moyenne glissante',
+           'diff_moyenne_itv': 'écart moyenne glissante *',
+           'diff_moyenne_gauche_itv': 'écart moyenne glissante, gauche',
+           #'diff_moyenne_classes' : 'écart moyenne glissante, classes' 
+           }
+
+
+
 def get_dpe_consumption(dep_code, old_built_filter=False):
     """
     Formate les données BDNB pour ne garder que les conso d'énergie compilées, et les enregistre en .csv
@@ -1035,11 +1048,8 @@ def df_compare_methods(seuils, path, old_built_filter, itv_bunching=10, force=Fa
         # Enregistrement du DataFrame du bunching en .csv
         df_compare.to_csv(os.path.join(output_folder_bunching, save_name))
         
-        # df_compare = df_compare[[f'Méthode {method}' for method in list_methods]] # todo : pourquoi ? 
-
     else:
         df_compare = pd.read_csv(os.path.join(output_folder_bunching, save_name), index_col='dep_code') 
-        # df_compare = df_compare[['département']+[f'Méthode {method}' for method in list_methods]] # todo : bizarre
     
     return df_compare
    
@@ -1079,9 +1089,9 @@ def main():
         
     # choix des paramètres de mesure du bunching
     # method='diff_beta'
-    method='diff_moyenne_itv'
+    # method='diff_beta_itv'
     # method = 'diff_simple_nb_dpe'
-    # method = 'diff_simple'
+    method = 'diff_simple'
     # itv_bunching = 5
     itv_bunching = 10
 
@@ -1208,8 +1218,8 @@ def main():
             plt.show()
             plt.close()
             
+            # Regplot entre bunching et nb_dpe_filtre
             if True: # todo : creer une fonction qui fait ça cut_france
-                # Regplot entre bunching et nb_dpe_filtre
                 
                 df_bunching = pd.DataFrame().from_dict(dict_dep_bunching, orient='index', columns=[f'Somme_seuils_{seuils_sans_slash}_method_{method}'])
                 
@@ -1274,15 +1284,13 @@ def main():
         output_folder = os.path.join('output',today)
         os.makedirs(output_folder, exist_ok=True)
    
-        draw_departement_map(calcul_nb_dpe_filtre(old_built_filter),output_folder,save="Carte du nombre de DPE sur lesquels on fit une distribution beta (curve_fit)", map_title="Carte du nombre de DPE sur lesquels on fit une distribution beta (curve_fit)") # todo: modifier nom/titre ?
-                
-        tac = time.time()
-        print(f'Done in {tac-tic:.2f}s.')
+        draw_departement_map(calcul_nb_dpe_filtre(old_built_filter),output_folder,save="Carte du nombre de DPE sur lesquels on fit une distribution beta (curve_fit)", map_title="Carte du nombre de DPE sur lesquels on fit une distribution beta (curve_fit)") 
         
         
         
         
-    # CALCUL DE DF_COMPARE POUR L'ENSEMBLE DES MÉTHODES (prend du temps)
+        
+    # CALCUL DE DF_COMPARE POUR L'ENSEMBLE DES MÉTHODES (prend un peu de temps)
     
     if False:
         seuils = ['D/E', 'E/F', 'F/G']
@@ -1298,22 +1306,43 @@ def main():
     if False: # corrélation entre deux méthodes
     
         seuils = ['D/E', 'E/F', 'F/G']
-        list_methods = ['diff_simple_nb_dpe', 'diff_moyenne', 'diff_beta']
+        method_1 = 'diff_moyenne' 
+        method_2 = 'diff_beta'
         itv_bunching = 10   # attention : on a le même itv_bunching pour toutes les méthodes ! (même si gauche ou centré)
 
+        # formatage d'une chaîne de caractère simplifiée pour identifier les seuils
+        seuils_sans_slash = '_'.join(seuils)
+        seuils_sans_slash = seuils_sans_slash.replace("/","")
+
         df_compare = df_compare_methods(seuils, output_folder, old_built_filter=old_built_filter, itv_bunching=itv_bunching)        
-        
-        data = df_compare[[f'Méthode {method}' for method in list_methods]]
 
         fig,ax = plt.subplots(figsize=(5,5),dpi=300)                  
-        sns.regplot(data=df_bunching, x="inv_nb_dpe_filtre", y=f'Somme_seuils_{seuils_sans_slash}_method_{method}',ax=ax)
-        ax.set_ylabel(f'Somme_seuils_{seuils_sans_slash}_method_{method}', fontsize=10)
-        ax.set_title(f"Corrélation entre l'inverse du nombre de DPE et\nle bunching aux seuils {seuils_sans_slash}, méthode {method}")
-    
+        sns.regplot(data=df_compare, x=f"Méthode {method_1}", y=f"Méthode {method_2}",ax=ax)
+        ax.set_xlabel(f'Méthode {methods_dict[method_1]}', fontsize = 12)
+        ax.set_ylabel(f'Méthode {methods_dict[method_2]}', fontsize = 12)
+
+        # calcul du coefficient de corrélation (r) et de la valeur-p
+        correlation, p_value = pearsonr(df_compare[f"Méthode {method_1}"], df_compare[f"Méthode {method_2}"])
+        ax.text(
+            0.05, 0.95, 
+            f"r = {correlation:.2f}\np = {p_value:.2e}", 
+            transform=ax.transAxes, 
+            fontsize=12, 
+            verticalalignment='top'
+            )
         
-    if False : # corrélation d'un groupe de méthodes avec pairplot
+        if old_built_filter:
+            save_path = os.path.join(output_folder,f'Correlation_methodes_{method_1}_et_{method_2}_seuils_{seuils_sans_slash}_old_built.png') 
+        else: 
+            save_path = os.path.join(output_folder,f'Correlation_methodes_{method_1}_et_{method_2}_seuils_{seuils_sans_slash}.png') 
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        
+        plt.show()
+        
+        
+    if False: # corrélation d'un groupe de méthodes avec pairplot
         seuils = ['D/E', 'E/F', 'F/G']
-        list_methods = ['diff_simple', 'diff_moyenne', 'diff_beta']
+        list_methods = ['diff_simple', 'diff_moyenne_itv', 'diff_beta_itv']
         # seuils = ['E/F']
         itv_bunching = 10   # attention : on a le même itv_bunching pour toutes les méthodes !
 
@@ -1325,7 +1354,7 @@ def main():
         df_compare = df_compare_methods(seuils, output_folder, old_built_filter=old_built_filter, itv_bunching=itv_bunching)        
         
         data = df_compare[[f'Méthode {method}' for method in list_methods]]
-        p = sns.pairplot(data=data, kind='reg', plot_kws={'marker': '+'}, diag_kind='kde')#, hue='nb_dpe_filtre')    
+        p = sns.pairplot(data=data, kind='reg', plot_kws={'marker': '+'}, diag_kind='kde') #, hue='nb_dpe_filtre')    
         # p.fig.suptitle(f"Corrélation entre les différentes méthodes de mesure du bunching\naux seuils {seuils_sans_slash}, old_built_filter = {old_built_filter}")
         # p.fig.subplots_adjust(top=0.92)
         
@@ -1354,8 +1383,9 @@ def main():
         
         
     # COMPARAISON METHODES BUNCHING ET GAIN MOYEN ETIQUETTE 
+    # todo: a déplacer dans manipulation_dpe.py ?
     
-    if True : 
+    if False : 
         seuils = ['D/E', 'E/F', 'F/G']
         list_methods = ['diff_simple_nb_dpe', 'diff_moyenne', 'diff_beta']
         itv_bunching = 10
@@ -1405,13 +1435,9 @@ def main():
         
     # TEST CLASSE GES VS CLASSE ENERGIE
     
-    if False:
+    if True:
         
         # france = France()
-        # dict_dep_nb_dpe_filtre = {d:0. for d in france.departements} 
-        
-            # nb_bilan_dpe_vs_calcul = 0
-            # nb_bilan_dpe_vs_ges = 0
         
         # for dep in france.departements :
             # dep_code = dep.code
@@ -1447,7 +1473,12 @@ def main():
             print('nb_bugs : ', len(dpe_data_cut_2_bugs))
             
             # todo idée : tracer des pie-charts de répartition des logements par départements 
-            
+
     
+
+
+    tac = time.time()
+    print(f'Done in {tac-tic:.2f}s.')
+
 if __name__ == '__main__':
     main()
