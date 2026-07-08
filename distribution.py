@@ -1174,28 +1174,6 @@ def main():
             draw_departement_map(dict_dep_bunching,output_folder,save=save, map_title=map_title)
 
 
-# =============================================================================
-# Pas une bonne idée car très long de calculer df_compare pour toutes les méthodes !
-
-#         # Somme sur une sélection de seuils seulement
-#         if True:
-#             seuils = ['D/E', 'E/F', 'F/G']
-#             df_compare = df_compare_methods(seuils, output_folder, old_built_filter, itv_bunching=10)
-#             dict_dep_bunching = {Departement(dep_code):bunching_somme for dep_code, bunching_somme in zip(df_compare.index, df_compare[f'Méthode {method}'])}
-#             
-#             if old_built_filter:
-#                 save=f"Carte somme du bunching aux seuils {seuils_sans_slash} (Méthode {method}, intervalle bunching = {itv_bunching} kWh.m-2, anciens logements)"
-#                 map_title=f"Somme du bunching aux seuils {seuils}\n(Méthode {method}, intervalle bunching = {itv_bunching}"" kWh.m$^{-2}$, anciens logements)"
-#             else :
-#                 save=f"Carte somme du bunching aux seuils {seuils_sans_slash} (Méthode {method}, intervalle bunching = {itv_bunching} kWh.m-2)"
-#                 map_title=f"Somme du bunching aux seuils {seuils}\n(Méthode {method}, intervalle bunching = {itv_bunching}"" kWh.m$^{-2}$)"
-# 
-#             draw_departement_map(dict_dep_bunching,output_folder,save=save, map_title=map_title)
-#             plt.show()
-#             plt.close()
-# =============================================================================
-
-
         # Somme sur une sélection de seuils seulement
         if True:
             seuils = ['D/E', 'E/F', 'F/G']
@@ -1277,6 +1255,7 @@ def main():
         
     
     
+    
     # CARTE DU NB_DPE_FILTRE
 
     if False :
@@ -1285,8 +1264,6 @@ def main():
         os.makedirs(output_folder, exist_ok=True)
    
         draw_departement_map(calcul_nb_dpe_filtre(old_built_filter),output_folder,save="Carte du nombre de DPE sur lesquels on fit une distribution beta (curve_fit)", map_title="Carte du nombre de DPE sur lesquels on fit une distribution beta (curve_fit)") 
-        
-        
         
         
         
@@ -1301,7 +1278,7 @@ def main():
         
         
     # SEABORN COMPARAISON METHODES
-    
+
     
     if False: # corrélation entre deux méthodes
     
@@ -1340,9 +1317,9 @@ def main():
         plt.show()
         
         
-    if False: # corrélation d'un groupe de méthodes avec pairplot
+    if True: # corrélation d'un groupe de méthodes avec pairplot
         seuils = ['D/E', 'E/F', 'F/G']
-        list_methods = ['diff_simple', 'diff_moyenne_itv', 'diff_beta_itv']
+        list_methods = ['diff_simple_nb_dpe', 'diff_moyenne', 'diff_beta']
         # seuils = ['E/F']
         itv_bunching = 10   # attention : on a le même itv_bunching pour toutes les méthodes !
 
@@ -1435,7 +1412,7 @@ def main():
         
     # TEST CLASSE GES VS CLASSE ENERGIE
     
-    if True:
+    if False:
         
         # france = France()
         
