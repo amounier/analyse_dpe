@@ -73,8 +73,11 @@ def get_dpe_consumption(dep_code, old_built_filter=False):
         dpe_data = dpe_data[dpe_data.type_dpe=='dpe arrêté 2021 3cl logement'][['conso_5_usages_ep_m2','conso_5_usages_ef_m2','periode_construction_dpe','surface_habitable_logement','date_etablissement_dpe']].compute() 
         if old_built_filter: 
             dpe_data = dpe_data[dpe_data.periode_construction_dpe.isin(['avant 1948','1948-1974'])]
+        
         #dpe_data = dpe_data[date_etablissement_dpe < 2024] # filtre qui enlève DPE après 2024 (réforme petites surfaces) --> mais enlève trop de données 
         #dpe_data = dpe_data[dpe_data.surface_habitable_logement > 40.] # todo: filtre qui enlève petits logements (en dessous de 40 m2) , garde Nan ou pas ?
+        #dpe_data = dpe_data[(dpe_data.surface_habitable_logement > 40.) & (date_etablissement_dpe < 2024)] # filtrage des petits logements après 2024 car n'ont pas les même seuils entre les classes
+        
         dpe_data = dpe_data[['conso_5_usages_ep_m2','conso_5_usages_ef_m2']]
         dpe_data.to_csv(os.path.join(output_folder, save_name))
         
@@ -1317,7 +1320,7 @@ def main():
         plt.show()
         
         
-    if True: # corrélation d'un groupe de méthodes avec pairplot
+    if False: # corrélation d'un groupe de méthodes avec pairplot
         seuils = ['D/E', 'E/F', 'F/G']
         list_methods = ['diff_simple_nb_dpe', 'diff_moyenne', 'diff_beta']
         # seuils = ['E/F']
@@ -1450,6 +1453,27 @@ def main():
             print('nb_bugs : ', len(dpe_data_cut_2_bugs))
             
             # todo idée : tracer des pie-charts de répartition des logements par départements 
+
+    
+
+    # CALCUL PART DES DPE METHODE 3CL 2021 (prend 45 min)
+    
+    if True:
+    
+        france = France()
+    
+        n_total = 0
+        n_filtre = 0
+        
+        for dep in france.departements :
+            dep_code = dep.code
+            dpe_data, _ , _ = get_bdnb(dep_code)
+            n_total = n_total + len(dpe_data)
+            n_filtre = n_filtre + len(dpe_data[dpe_data.type_dpe=='dpe arrêté 2021 3cl logement'])
+        
+        part_dpe_3CL = n_filtre / n_total
+        print(n_total, n_filtre)
+        print(part_dpe_3CL) # = 0.591
 
     
 
