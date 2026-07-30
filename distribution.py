@@ -287,6 +287,16 @@ def plot_dpe_distribution(path, dep_code, save, plot_mean, plot_median, window_s
     departement = Departement(dep_code)
     
     dpe_data = get_dpe_consumption(dep_code, old_built_filter=old_built_filter) 
+    
+# =============================================================================
+#   # NEW BUILT FILTER (garde uniquement les constructions apres 1974)
+
+    # dpe_data, _ , _ = get_bdnb(dep_code)
+    # dpe_data = dpe_data[dpe_data.type_dpe=='dpe arrêté 2021 3cl logement'][['conso_5_usages_ep_m2','conso_5_usages_ef_m2','periode_construction_dpe','surface_habitable_logement','date_etablissement_dpe']].compute() 
+    # dpe_data = dpe_data[~dpe_data.periode_construction_dpe.isin(['avant 1948','1948-1974'])]
+    # dpe_data = dpe_data[['conso_5_usages_ep_m2','conso_5_usages_ef_m2']]
+# =============================================================================
+    
     dpe_data = dpe_data.dropna()
     dpe_data = dpe_data.map(round)
     nb_dpe = len(dpe_data) # pour pouvoir normaliser
@@ -329,19 +339,20 @@ def plot_dpe_distribution(path, dep_code, save, plot_mean, plot_median, window_s
         ax.plot(x_data, pdf, "k--", label=f'curve_fit\n(R$^{{2}}$={r2_value:.2f})')
   
 # =============================================================================
-#     # Pour illustration méthode diff_simple
+    # Pour illustration méthode diff_simple
 
-#     plt.vlines(320.5, 0, counter_dict_sorted[320], color='k', linestyles='dashed') 
-#     plt.vlines(340.5, 0, counter_dict_sorted[340], color='k', linestyles='dashed') 
-#     x_translation = [x-9 for x in counter_dict_sorted.keys()]
-#     ax.plot(x_translation, list(counter_dict_sorted.values()), "k--", ds='steps-mid', linewidth = 0.7)
-#     ax.annotate("$b_{E/F}$",
-#         xy=(0.375, 0.38),
-#         xycoords=ax.transAxes,
-#         ha = 'center',
-#         fontsize=20)
-#     ax.set_xlim([310,350])
-#     ax.set_ylim([0,260])
+    # plt.vlines(320.5, 0, counter_dict_sorted[320], color='k') #, linestyles='dashed') 
+    # plt.vlines(340.5, 0, counter_dict_sorted[340], color='k') #, linestyles='dashed') 
+    # x_translation = [x-10 for x in counter_dict_sorted.keys()]
+    # ax.plot(x_translation, list(counter_dict_sorted.values()), "k--", ds='steps-mid', linewidth = 0.7)
+    # ax.annotate("A",
+    #     xy=(0.375, 0.37),
+    #     xycoords=ax.transAxes,
+    #     ha = 'center',
+    #     fontsize=20,
+    #     fontstyle='italic')
+    # ax.set_xlim([310,350])
+    # ax.set_ylim([0,260])
 # =============================================================================
         
     ax.legend()    
@@ -1074,17 +1085,17 @@ def main():
     output_folder = os.path.join('output',today)
     os.makedirs(output_folder, exist_ok=True)
     
-    dep = Departement('85')
-    old_built_filter = True
+    dep = Departement('59')
+    old_built_filter = False
     window_size = 50  # fenêtre de la moyenne glissante (rolling de la méthode 'diff_moyenne')
     
     
     # DISTRIBUTION DES DPE
     
     # tracé de la distribution des dpe du département
-    if False:
+    if True:
         #dpe_data = get_dpe_consumption(dep.code)
-        plot_dpe_distribution(output_folder,dep.code, save=True, plot_mean=False, plot_median=False, window_size = window_size, plot_curve_fit=True, old_built_filter=old_built_filter, max_xlim=600)
+        plot_dpe_distribution(output_folder,dep.code, save=True, plot_mean=False, plot_median=False, window_size = window_size, plot_curve_fit=False, old_built_filter=old_built_filter, max_xlim=600)
     
     
         
@@ -1458,7 +1469,7 @@ def main():
 
     # CALCUL PART DES DPE METHODE 3CL 2021 (prend 45 min)
     
-    if True:
+    if False:
     
         france = France()
     

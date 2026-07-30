@@ -53,7 +53,7 @@ def filter_bdnb_individual(dep_code, force):
     os.makedirs(output_folder, exist_ok=True)
     existing_files = os.listdir(output_folder)
     
-    # Définsankeyition du nom du fichier final
+    # Définition du nom du fichier final
     save_name = f'bdnb_filter_individual_dep{dep_code}'
     
     if save_name not in existing_files or force:
@@ -68,22 +68,20 @@ def filter_bdnb_individual(dep_code, force):
         bdnb_rel_batiment_groupe_dpe_logement = bdnb_rel_batiment_groupe_dpe_logement.compute()
         #doublons = bdnb_rel_batiment_groupe_dpe_logement[bdnb_rel_batiment_groupe_dpe_logement.duplicated(subset = ["identifiant_dpe"], keep=False)]
     
-    
         # Filtrage des DPE arrêté 2021 méthode 3CL logement
         bdnb_dpe_logement = bdnb_dpe_logement[(bdnb_dpe_logement.type_dpe =='dpe arrêté 2021 3cl logement') & (bdnb_dpe_logement.type_batiment_dpe == 'maison')][['identifiant_dpe','type_batiment_dpe', 'date_etablissement_dpe', 'conso_5_usages_ep_m2', 'classe_bilan_dpe','surface_habitable_logement']]
-        # bdnb_dpe_logement = bdnb_dpe_logement.set_index('identifiant_dpe') # pourquoi ?
         bdnb_dpe_logement = bdnb_dpe_logement.compute()
-        bdnb_dpe_logement.dropna(inplace = True) # certains DPE n'ont pas de surface associée (2021) # todo : enlever aussi si pas d'adresse ?
+        bdnb_dpe_logement.dropna(inplace = True) # certains DPE n'ont pas de surface associée (2021) 
         
-        bdnb_join_id_dpe = bdnb_batiment_groupe_compile.merge(bdnb_rel_batiment_groupe_dpe_logement, how='inner', on='batiment_groupe_id')
+        # Jointure des différentes bases
+        bdnb_join_id_dpe = bdnb_batiment_groupe_compile.merge(bdnb_rel_batiment_groupe_dpe_logement, how='inner', on='batiment_groupe_id') # 'inner' --> intersection des deux car bdnb_batiment_groupe_compile contient des id bâtiments sans DPE, et bdnb_rel_batiment_groupe_dpe_logement contient des id_DPE de logements collectifs
         
-        bdnb_filter_individual = bdnb_join_id_dpe.merge(bdnb_dpe_logement, how='inner', on='identifiant_dpe') # on conserve seulement les DPE méthode 3CL 2021 correspondant logements indiv
-        doublons = bdnb_filter_individual[bdnb_filter_individual.duplicated(subset = ["identifiant_dpe"], keep=False)] # pour observer les id_dpe en doublons (car correspondants à plusieurs bâtiments à la fois)
-        # display(doublons)
+        bdnb_filter_individual = bdnb_join_id_dpe.merge(bdnb_dpe_logement, how='inner', on='identifiant_dpe') # intersection : on conserve seulement les DPE méthode 3CL 2021 correspondant à des logements individuels
+        #doublons = bdnb_filter_individual[bdnb_filter_individual.duplicated(subset = ["identifiant_dpe"], keep=False)] # pour observer les id_dpe en doublons (car correspondants à plusieurs bâtiments à la fois)
         bdnb_filter_individual.drop_duplicates(subset = ["identifiant_dpe"], keep=False, inplace = True) # pour supprimer tous les id_dpe associés à plusieurs bâtiments à la fois
-        
-        
-        bdnb_filter_individual.to_csv(os.path.join(output_folder, save_name), index = False)
+                
+        # Enregistrement en csv
+        bdnb_filter_individual.to_csv(os.path.join(output_folder, save_name), index = False) # index = False permet de ne pas enregistrer la colonne d'index, qui sera recréée automatiquement lors de read_csv
 
     
     else:
@@ -93,12 +91,12 @@ def filter_bdnb_individual(dep_code, force):
     return bdnb_filter_individual
 
 
-# %%
+# %% SELECTION DES PAIRES DE DPE SUCESSIFS
 
-def filter_manipulated(dep_code, period = 30): 
-# todo : exclure DPE identiques fait le meme jour = doublons ? verifier que meme infos détaillées ou pas
+def filter_manipulated(dep_code, period = 20): 
+# todo : exclure DPE identiques fait le meme jour = doublons ? verifier que meme infos détaillées ou pas -> a priori il n'y a pas tant de doublons
     """
-    Identification des bâtiments ayant calculés plusieurs DPEs .
+    Identification des bâtiments ayant calculés plusieurs DPE.
     
     Parameters
     ----------
@@ -110,7 +108,7 @@ def filter_manipulated(dep_code, period = 30):
     Returns
     -------
     df_epc_evolution : pandas DataFrame
-        DataFrame des paires de DPEs successifs pour chaque bâtiment du département.
+        DataFrame des paires de DPE successifs pour chaque bâtiment du département.
         Colonnes :
             - batiment_groupe_id (index) : identifiant du batiment
             - first_epc_id : identifiant du premier DPE calculé
@@ -125,7 +123,7 @@ def filter_manipulated(dep_code, period = 30):
     bdnb_df = filter_bdnb_individual(dep_code, force=False) # prend du temps si non déjà stocké en .csv
     
     # Filtrage des valeurs aberrantes
-    filtre = zscore(bdnb_df.conso_5_usages_ep_m2)<5
+    filtre = zscore(bdnb_df.conso_5_usages_ep_m2)<5 # todo : il faudrait peut-être aussi filtrer les valeurs trop faibles ?
     bdnb_df = bdnb_df[filtre]
     
     # on conserve uniquement les bâtiments qui ont plus d'un DPE
@@ -140,11 +138,11 @@ def filter_manipulated(dep_code, period = 30):
         consecutive_pairs = []
         for i in range(len(group)-1):
             date_diff = (group.iloc[i+1]['date_etablissement_dpe'] - group.iloc[i]['date_etablissement_dpe']).days
-            if date_diff < period : # todo : mettre un <=
+            if date_diff < period : 
                 consecutive_pairs.append({
                     'adresse_brut': group.iloc[i]['adresse_brut'],
                     'first_epc_id': group.iloc[i]['identifiant_dpe'],
-                    'epc_date_1': group.iloc[i]['date_etablissement_dpe'].strftime("%d %b %Y"), # todo : laisser en format date ?
+                    'epc_date_1': group.iloc[i]['date_etablissement_dpe'].strftime("%d %b %Y"), # on enlève l'heure qui n'est pas pertinente dans la base de données
                     'epc_cons_1': group.iloc[i]['conso_5_usages_ep_m2'],
                     'first_epc': group.iloc[i]['classe_bilan_dpe'],
                     'surface_1' : group.iloc[i]['surface_habitable_logement'],
@@ -152,26 +150,27 @@ def filter_manipulated(dep_code, period = 30):
                     'epc_date_2': group.iloc[i+1]['date_etablissement_dpe'].strftime("%d %b %Y"),
                     'epc_cons_2': group.iloc[i+1]['conso_5_usages_ep_m2'],
                     'second_epc': group.iloc[i+1]['classe_bilan_dpe'],
-                    'surface_2' : group.iloc[i+1]['surface_habitable_logement']
+                    'surface_2' : group.iloc[i+1]['surface_habitable_logement'],
+                    'date_diff' : date_diff
                 }) #'batiment_groupe_id': group.name, # groupby fait des Series (cf ci-dessous)
 
         return pd.DataFrame(consecutive_pairs)
 
     df_epc_evolution = df_sorted.groupby('batiment_groupe_id').apply(extract_consecutive_dpe, period=period)
     
-    # df_epc_evolution = df_epc_evolution.reset_index(drop=True) # pour nettoyer colonne inutile
-    
-    # df_epc_evolution['conso_diff'] =  df_epc_evolution.epc_cons_2 - df_epc_evolution.epc_cons_1
-    # df_epc_evolution['conso_diff_rel'] =  df_epc_evolution.conso_diff / ((df_epc_evolution.epc_cons_2 + df_epc_evolution.epc_cons_1)/2) *100
-    # todo : a suppr car on a déjà ligne suivante
+    # Formatage de l'index du dataframe
+    df_epc_evolution = df_epc_evolution.reset_index(drop=False)
+    df_epc_evolution.rename(columns={"level_1": "numero_paire_de_dpe"}, inplace=True)
+    df_epc_evolution.numero_paire_de_dpe = df_epc_evolution.numero_paire_de_dpe + 1
 
-    df_epc_evolution = variable_diff(df_epc_evolution, variable = 'epc_cons') 
+    # ajout colonne des variables_diff # todo : supprimer car c'est fait dans plot_variable_diff ?
+    # df_epc_evolution = variable_diff(df_epc_evolution, variable = 'epc_cons') 
     # df_epc_evolution = variable_diff(df_epc_evolution, variable = 'surface')
 
     return df_epc_evolution   
 
 
-def filter_manipulated_national(period): # attention : prend du temps --> enregistrer les variables .spydata en local
+def filter_manipulated_national(period, force = False): # attention : prend du temps (~5 min pour period = 20)
     """
     Creation du DataFrame des DPE successifs sur l'ensemble des départements.
 
@@ -179,42 +178,60 @@ def filter_manipulated_national(period): # attention : prend du temps --> enregi
     ----------
     period : int
         écart de temps maximal entre deux DPE successifs avant de considérer que des rénovations énergétiques ont pu avoir lieu.
-
+    force : boolean
+        force le compute et le ré-enregistrement en .csv
+        
     Returns
     -------
     df_epc_evolution_national
-        DataFrame des paires de DPEs successifs pour chaque bâtiment.
+        DataFrame des paires de DPE successifs pour chaque bâtiment.
     """
     
+    # Définition du chemin de sauvegarde du DataFrame en .csv
+    output_folder = os.path.join('data', 'BDNB', 'df_epc_evolution')
+    os.makedirs(output_folder, exist_ok=True)
+    existing_files = os.listdir(output_folder)
     
-    france=France()
-    df_epc_evolution_national = pd.DataFrame()
-    for dep in tqdm.tqdm(france.departements):
-        dep_code = dep.code
-        df_epc_evolution_dep = filter_manipulated(dep_code, period=period)
-        df_epc_evolution_national = pd.concat([df_epc_evolution_national, df_epc_evolution_dep])
+    # Définition du nom du fichier final
+    save_name = f'df_epc_evolution_national_period_{period}'
     
+    if save_name not in existing_files or force:
+    
+        france=France()
+        df_epc_evolution_national = pd.DataFrame()
+        for dep in tqdm.tqdm(france.departements):
+            dep_code = dep.code
+            df_epc_evolution_dep = filter_manipulated(dep_code, period=period)
+            df_epc_evolution_national = pd.concat([df_epc_evolution_national, df_epc_evolution_dep])
+        
+        # Enregistrement en csv
+        df_epc_evolution_national.to_csv(os.path.join(output_folder, save_name), index = False) # index = False permet de ne pas enregistrer la colonne d'index, qui sera recréée automatiquement lors de read_csv
+
+    else:
+        df_epc_evolution_national = pd.read_csv(os.path.join(output_folder, save_name)) 
+
     return df_epc_evolution_national   
 
 
+# %% ANALYSE DE L'EVOLUTION DE CERTAINES VARIABLES ENTRE DPE SUCCESSIFS
 
-def variable_diff(df_epc_evolution, variable = 'surface'): #todo : bizarre d'avoir dep_code ici ?
+# Dictionnaire pour le tracé des figures
+variable_dict = {'epc_cons':'conso. énergétique',
+           'epc_date':'date',
+           'surface':'surface'}
+
+
+def variable_diff(df_epc_evolution, variable = 'epc_cons'):
     """
-    Ajoute des colonnes {variable}_diff et {variable}_diff_rel (différence relative à la moyenne des deux DPEs) au DataFrame df_epc_evolution, et peut également plot l'histogramme des variations de cette variable.
+    Ajout des colonnes {variable}_diff et {variable}_diff_rel (différence relative à la MOYENNE des deux DPE) au DataFrame df_epc_evolution
 
     Parameters
     ----------
-    dep_code : str
-        code du departement.
     df_epc_evolution : pandas DataFrame
-        DataFrame initial.
+        DataFrame initial, comportant deux colonnes nommées '{variable}_1' et '{variable}_2'
     variable : str, optional
-        nom de la variable d'intérêt. The default is 'surface'.
-    plot_variable_evolution : boolean, optional
-        plot l'écart de {variable} entre DPEs successifs pour l'ensemble du département. The default is True.
-    ecart_relatif : boolean, optional
-        trace l'histogramme en écart relatif et non absolu. The default is True.
-
+        nom de la variable d'intérêt : 'epc_cons', 'epc_date' ou 'surface'. The default is 'epc_cons'.
+   
     Returns
     -------
     df_epc_evolution : pandas DataFrame
@@ -222,15 +239,36 @@ def variable_diff(df_epc_evolution, variable = 'surface'): #todo : bizarre d'avo
     """
 
     df_epc_evolution[f'{variable}_diff'] =  df_epc_evolution[f"{variable}_2"] - df_epc_evolution[f"{variable}_1"]
-    df_epc_evolution[f'{variable}_diff_rel'] =  df_epc_evolution[f'{variable}_diff'] / ((df_epc_evolution[f"{variable}_1"]+df_epc_evolution[f"{variable}_2"])/2) *100  # écart relatif par rapport à la moyenne des variables entre les deux DPEs
+    df_epc_evolution[f'{variable}_diff_rel'] =  df_epc_evolution[f'{variable}_diff'] / ((df_epc_evolution[f"{variable}_1"]+df_epc_evolution[f"{variable}_2"])/2) *100  # écart relatif par rapport à la moyenne des variables entre les deux DPE
 
 
     return df_epc_evolution
 
 
 
-def plot_variable_diff(national_scale, period, dep_code='91', variable='surface', ecart_relatif = True):
+def plot_variable_diff(national_scale, period, dep_code=None, variable='epc_cons', ecart_relatif = True):
+    """
+    Trace l'histogramme des variations de {variable} entre paires de DPE.
+
+    Parameters
+    ----------
+    national_scale : boolean
+        trace à l'échelle nationale (utilise filter_manipulated_national). Le paramètre dep_code est alors inutile.
+    period : int
+        écart de temps maximal entre deux DPE successifs avant de considérer que des rénovations énergétiques ont pu avoir lieu.
+    dep_code : TYPE, optional
+        code du departement, si national_scale = False. The default is None.
+    variable : TYPE, optional
+        nom de la variable d'intérêt : 'epc_cons', 'epc_date' ou 'surface'. The default is 'epc_cons'.
+    ecart_relatif : boolean, optional
+        trace l'histogramme des variations RELATIVES (attention : différence relative à la MOYENNE des deux DPE, cf fonction variable_diff). The default is True.
+
+    Returns
+    -------
+    None
+    """
     
+    # Définition du dataframe des paires de DPE à considérer
     if national_scale:
         df_epc_evolution = filter_manipulated_national(period)
     else:
@@ -243,7 +281,8 @@ def plot_variable_diff(national_scale, period, dep_code='91', variable='surface'
     # Calculs de statistiques générales
     count_diff = len(df_epc_evolution[df_epc_evolution[f'{variable}_diff'] != 0])
     diff_percent = count_diff / len(df_epc_evolution) *100
-    print(f'Nombre de modifications de {variable} non nulles pour le département {dep_code} :', count_diff, f'parmi N={len(df_epc_evolution)} ({diff_percent:.1f} %)')
+    print(f'Nombre de modifications de {variable} non nulles :', count_diff, f'parmi N={len(df_epc_evolution)} ({diff_percent:.1f} %)')
+    print(f'Nombre de modifications de {variable} nulles :', len(df_epc_evolution)-count_diff, f'parmi N={len(df_epc_evolution)} ({100-diff_percent:.1f} %)') 
     
     count_diff_neg = len(df_epc_evolution[df_epc_evolution[f'{variable}_diff'] < 0])
     diff_neg_percent = count_diff_neg / len(df_epc_evolution) *100
@@ -252,86 +291,108 @@ def plot_variable_diff(national_scale, period, dep_code='91', variable='surface'
     diff_pos_percent = count_diff_pos / len(df_epc_evolution) *100
     
     if variable == 'surface':
-        surface_manip_count_2 = len(df_epc_evolution) - len(df_epc_evolution[(-1 < df_epc_evolution.surface_diff) & (df_epc_evolution.surface_diff < 1)])
-        surface_manip_count_2_percent = surface_manip_count_2 / len(df_epc_evolution) *100
-        print(f'Nombre de modifications de surface supérieures à +-1 m2 pour le département {dep_code} :', surface_manip_count_2, f'parmi N={len(df_epc_evolution)} ({surface_manip_count_2_percent:.1f} %)')
+        surface_manip_count = len(df_epc_evolution) - len(df_epc_evolution[(-1 < df_epc_evolution.surface_diff) & (df_epc_evolution.surface_diff < 1)])
+        surface_manip_count_percent = surface_manip_count / len(df_epc_evolution) *100
+        print('Nombre de modifications de surface supérieures à +-1 m2 :', surface_manip_count, f'parmi N={len(df_epc_evolution)} ({surface_manip_count_percent:.1f} %)')
+
+    # Calcul de la moyenne et de l'écart-type pour la colonne d'intérêt
+    if ecart_relatif:
+        data_col = f'{variable}_diff_rel'
+        unit = "%"
+    else:
+        data_col = f'{variable}_diff'
+        unit = "kWh/m2" 
+
+    mean_val = df_epc_evolution[data_col].mean()
+    std_val = df_epc_evolution[data_col].std()
+
+    # Alternative pour une distribution non normale : calcul des percentiles
+    percentile_2_5 = df_epc_evolution[data_col].quantile(0.025)
+    percentile_97_5 = df_epc_evolution[data_col].quantile(0.975)
+    
+    print(f"Moyenne de {data_col} : {mean_val:.2f} {unit}")
+    print(f"Écart-type de {data_col} : {std_val:.2f} {unit}")
+    print(f"Intervalle à 95% (percentiles 2.5 et 97.5) : [{percentile_2_5:.2f}, {percentile_97_5:.2f}] {unit}")
 
 
+    # Tracé de l'histogramme
+    
     fig, ax = plt.subplots(figsize=(5,5), dpi=300)
     
     # Définition des bins pour avoir histogramme centré en 0 
-    max_variable = int(max(np.abs(df_epc_evolution[f'{variable}_diff_rel'])))
+    max_variable = int(max(np.abs(df_epc_evolution[data_col]))) 
     bins_width = 1
     bins= np.asarray(range(-max_variable//bins_width*bins_width, max_variable//bins_width*bins_width+1, bins_width))
     bins = bins +bins_width/2
-    # bins = list()
-    
-    if ecart_relatif :
-        df_epc_evolution.hist(column=f'{variable}_diff_rel', ax=ax, bins=bins, grid=False, color=plt.get_cmap('viridis')(0.4))
+
+    df_epc_evolution.hist(column=data_col, ax=ax, bins=bins, grid=False, color=plt.get_cmap('viridis')(0.4))
         
-        if national_scale :
-            ax.set_title(f"Ensemble des départements, N={len(df_epc_evolution)}. period = {period} jours)") 
-        else :
-            ax.set_title(f"Ecart relatif de {variable} entre deux DPE successifs\n({departement.name} - {departement.code}, N={len(df_epc_evolution)})") # changer nom figure ?
+    if ecart_relatif :
+        ax.set_title(None)
+        if national_scale==False:
+            ax.set_title(f"{departement.name} - {departement.code}, N={len(df_epc_evolution)}") 
         ax.set_ylabel("Nombre d'observations")
-        ax.set_xlabel(f"Ecart de {variable} entre DPE successifs, en %")
+        ax.set_xlabel(f"Ecart relatif de {variable_dict[variable]} entre DPE successifs, en %")
         
         ax.set_xlim([-100,100])
-        ax.set_ylim(bottom=1)
-        
     else:
-        df_epc_evolution.hist(column=f'{variable}_diff', ax=ax, bins=bins, grid=False, color='k') # todo : mettre liste de valeur avec sequence  bins=np.linspace(), , eventuellement utiliser seaborn, pour centre l'histogramme
-        if national_scale :
-            ax.set_title(f"Ensemble des départements, N={len(df_epc_evolution)}. period = {period} jours")
-        else :
-            ax.set_title(f"Evolution de {variable} entre deux DPE successifs\n({departement.name} - {departement.code}, N={len(df_epc_evolution)})")
+        ax.set_title(None)
+        if national_scale==False:
+            ax.set_title(f"{departement.name} - {departement.code}, N={len(df_epc_evolution)}") 
         ax.set_ylabel("Nombre d'observations")
-        ax.set_xlabel(f"Différence de {variable} entre DPE successifs")
-        ax.set_yscale('log')
+        ax.set_xlabel(f"Ecart de {variable_dict[variable]} entre DPE successifs")
         
-        ax.set_xlim([-max_variable,max_variable])
-        ax.set_ylim(bottom=1)
+        # ax.set_xlim([-max_variable,max_variable])
+        ax.set_xlim([percentile_2_5-10,percentile_97_5+10])
     
-    ax.grid(alpha=0.3, zorder=-1)
-    ax.vlines(x=0, xmin=0, linewidth = 1, xmax=max_xlim, color='k', alpha=0.4, zorder=-1) #todo : modif
+    ax.set_yscale('log')
+    ax.set_ylim(bottom=1)
 
-    ax.annotate(f"1$^{{er}}$ > 2$^{{e}}$ : {diff_neg_percent:.1f} %", #todo : modif en fonction de si c'est relati ou pas
+    
+    # Ajout d'une annotation sur le graphique pour l'intervalle
+    ax.axvline(x=mean_val, color='red', linestyle='--', linewidth=1, alpha=0.7, label=f'Moyenne = {mean_val:.1f}')
+    ax.axvline(x=percentile_2_5, color='blue', linestyle=':', linewidth=1, alpha=0.5, label=f'95% : [{percentile_2_5:.0f}, {percentile_97_5:.0f}]')
+    ax.axvline(x=percentile_97_5, color='blue', linestyle=':', linewidth=1, alpha=0.5)
+            
+    ax.annotate(f"1$^{{er}}$ > 2$^{{e}}$ : {diff_neg_percent:.1f} %", 
         xy=(0.25, 0.7),
         xycoords=ax.transAxes,
         ha = 'center',
         fontsize=10)
-    
-    # ax.annotate(f"DPE à {variable} stable : {len(df_epc_evolution[df_epc_evolution[f'{variable}_diff'] == 0])}", #f"DPE à variable inchangée : {100 - diff_percent:.1f} %",
-    #     xy = (0.45, 0.99),
-    #     xytext=(0.5, 0.9),
-    #     xycoords=ax.transAxes,
-    #     ha = 'center',
-    #     #arrowprops=dict(arrowstyle = "->"),
-    #     fontsize=10)
-    
+# =============================================================================
+#     ax.annotate(f"DPE à {variable} stable : {len(df_epc_evolution[df_epc_evolution[f'{variable}_diff'] == 0])}", #f"DPE à variable inchangée : {100 - diff_percent:.1f} %",
+#         xy = (0.45, 0.99),
+#         xytext=(0.5, 0.9),
+#         xycoords=ax.transAxes,
+#         ha = 'center',
+#         fontsize=10)
+# =============================================================================
     ax.annotate(f"1$^{{er}}$ < 2$^{{e}}$ : {diff_pos_percent:.1f} %",
         xy=(0.75, 0.7),
         xycoords=ax.transAxes,
         ha = 'center',
         fontsize=10)
-            
+    
+    ax.legend(loc='lower right')
+    
     
     # Enregistrement de la figure
     output_folder_hist_variations = os.path.join('output', '6. hist_variations_entre_DPE_successifs')
     os.makedirs(output_folder_hist_variations, exist_ok=True)
-    existing_files = os.listdir(output_folder_hist_variations)
     
     if ecart_relatif :
-        save_name = f'Ecart_relatif_surface_entre_DPE_successifs_dep{dep_code}.png'
-        
+        save_name = f'Ecart_relatif_{variable}_entre_DPE_successifs_{period}_dep{dep_code}.png'
     else:
-        save_name = f'Ecart_surface_entre_DPE_successifs_dep{dep_code}.png'
+        save_name = f'Ecart_{variable}_entre_DPE_successifs_{period}_dep{dep_code}.png'
+    if national_scale:
+        save_name = save_name.replace(f'dep{dep_code}.png','national.png')
     plt.savefig(os.path.join(output_folder_hist_variations,save_name), bbox_inches='tight')
-
-
+    
     
     return 
 
+
+# %% 
 
 def plot_distrib_dpe_sucessifs(national_scale, period, dep_code='91', max_xlim =600):
     if national_scale:
@@ -555,7 +616,7 @@ def plot_gain_period(national_scale, dep_code='91', period_max=120, bins_size = 
     
     df_epc_evolution['ecart_date'] = pd.to_datetime(df_epc_evolution.epc_date_2, format="%d %b %Y") - pd.to_datetime(df_epc_evolution.epc_date_1, format="%d %b %Y")
     df_epc_evolution['ecart_date'] = df_epc_evolution['ecart_date'].dt.days
-    # Calcul du gain moyen d'étiquette sur l'ensemble des paires de DPEs successifs
+    # Calcul du gain moyen d'étiquette sur l'ensemble des paires de DPE successifs
     epc_order = {'A':7, 'B': 6, 'C': 5, 'D': 4, 'E': 3, 'F': 2, 'G': 1} # on attribue valeur à chaque classe
     df_epc_evolution['first_val'] = df_epc_evolution['first_epc'].map(epc_order) 
     df_epc_evolution['second_val'] = df_epc_evolution['second_epc'].map(epc_order)
@@ -605,7 +666,6 @@ def plot_gain_period(national_scale, dep_code='91', period_max=120, bins_size = 
     
     # sns.regplot(data=df_epc_evolution, x='ecart_date', y='gain_etiquette') 
 
-
     return
 
 
@@ -618,14 +678,14 @@ def analyse_gain_etiquette(dep_code, period):
     stable_mask = df_epc_evolution['first_epc'] == df_epc_evolution['second_epc']
     part_dpe_stables = stable_mask.sum() / N
     
-    # Calcul du gain moyen d'étiquette sur l'ensemble des paires de DPEs successifs
+    # Calcul du gain moyen d'étiquette sur l'ensemble des paires de DPE successifs
     epc_order = {'A':7, 'B': 6, 'C': 5, 'D': 4, 'E': 3, 'F': 2, 'G': 1} # on attribue valeur à chaque classe
     df_epc_evolution['first_val'] = df_epc_evolution['first_epc'].map(epc_order) 
     df_epc_evolution['second_val'] = df_epc_evolution['second_epc'].map(epc_order)
     df_epc_evolution['gain_etiquette'] = df_epc_evolution['second_val'] - df_epc_evolution['first_val']
     gain_moyen_etiquette = df_epc_evolution['gain_etiquette'].mean()
 
-    # Calcul du gain moyen d'étiquette parmi les DPEs modifiés uniquement
+    # Calcul du gain moyen d'étiquette parmi les DPE modifiés uniquement
     modif_mask = ~stable_mask
     gain_moyen_etiquette_parmi_modif = df_epc_evolution.loc[modif_mask,'gain_etiquette'].mean()
     
@@ -685,7 +745,7 @@ def dicts_dep_gain_moyen_etiquette(period, save_json=False):
     os.makedirs(output_folder, exist_ok=True)
 
     save = f'carte_part_dpe_stables_sur_{period}_jours'
-    map_title = f'Part des DPEs stables sur {period} jours (%)'
+    map_title = f'Part des DPE stables sur {period} jours (%)'
     draw_departement_map(dict_part_dpe_stables, output_folder,save=save, map_title=map_title) # todo : fixer les bornes de la colorbar ? 
     plt.show()
     plt.close()
@@ -710,25 +770,27 @@ def dicts_dep_gain_moyen_etiquette(period, save_json=False):
     
 
 
-# %%
+# %% HEATMAP ET DIAGRAMME DE SANKEY
 
 
-def plot_heatmap(national_scale=True, dep_code=None, frequency=True, period = 20):
+def plot_heatmap(national_scale, dep_code=None, frequency=True, period = 20):
     """
-    Formate un DataFrame de comparaison de DPE successifs en un DataFrame 2D comptant les évolutions entre classes.
+    Tracé de la heatmap de comparaison des paires de DPE successifs.
 
     Parameters
     ----------
-    df_epc_evolution : pandas DataFrame
-        DataFrame de comparaison de DPE successifs (issu de filter_manipulated)
+    national_scale : boolean
+        trace à l'échelle nationale (utilise filter_manipulated_national). Le paramètre dep_code est alors inutile.
+    dep_code : TYPE, optional
+        code du departement, si national_scale = False. The default is None.
+    period : int
+        écart de temps maximal entre deux DPE successifs avant de considérer que des rénovations énergétiques ont pu avoir lieu. 
     frequency : boolean
         if True, trace la heatmap en fréquence et non en absolu
 
     Returns
     -------
-    df_heatmap : pandas DataFrame
-        Matrice des transitions entre classes de DPE successifs.
-        Colonnes = 1er DPE, Lignes = 2e DPE.
+    None
     """
     
     if national_scale:
@@ -739,7 +801,7 @@ def plot_heatmap(national_scale=True, dep_code=None, frequency=True, period = 20
         # Version rapide non nettoyée
         df_epc_evolution = filter_manipulated(dep_code, period = period)  
         
-        # Version nettoyée des DPEs en double : (beaucoup plus long car il faut télécharger tous les json) mais ne change pas grand chose --> a eviter
+        # Version nettoyée des DPE en double : (beaucoup plus long car il faut télécharger tous les json) mais ne change pas grand chose --> a eviter
         # df_epc_evolution = delete_dpe_copies(dep_code, plot_surface_evolution = False, period = period)
     
     # Décompte de la fréquence des transitions avec crosstab()
@@ -759,7 +821,6 @@ def plot_heatmap(national_scale=True, dep_code=None, frequency=True, period = 20
     annot = np.round(annot, 1)
     annot = np.where(annot != 0, annot, "")
 
-
     # Tracé de la figure    
     fig,ax = plt.subplots(figsize=(5,5), dpi=300)
 
@@ -772,9 +833,7 @@ def plot_heatmap(national_scale=True, dep_code=None, frequency=True, period = 20
     else:
         ax = sns.heatmap(df_heatmap, ax=ax, annot=annot, fmt="", cmap='bone_r', cbar_ax=cbar_ax,cbar=True,cbar_kws={'label':"Nombre d'observations"})
     
-    if national_scale : 
-        ax.set_title(f'Logements individuels, ensemble des départements\nPériode de {period} jours, N={len(df_epc_evolution)}')
-    else : 
+    if national_scale==False: 
         ax.set_title(f'Logements individuels, {departement.name} - {departement.code}\nPériode de {period} jours, N={len(df_epc_evolution)}')
     for spine in ax.spines.values():
         spine.set_visible(True)
@@ -799,29 +858,41 @@ def plot_heatmap(national_scale=True, dep_code=None, frequency=True, period = 20
 
     plt.savefig(os.path.join(output_folder_heatmap,save_name), bbox_inches='tight')
     
-    
     plt.show()
 
-
     return 
 
 
 
-def plot_pysankey(df_epc_evolution):
-    
-    sankey(df_epc_evolution["first_epc"], df_epc_evolution["second_epc"], aspect=20, colorDict = etiquette_colors_dict, fontsize=12)
+def plotly_sankey(national_scale, period, dep_code=None):
+    """
+    Tracé du diagramme de Sankey de l'évolution des classes énergétiques entre DPE successifs dans une fenêtre web.
 
-    return 
+    Parameters
+    ----------
+    national_scale : boolean
+        trace à l'échelle nationale (utilise filter_manipulated_national). Le paramètre dep_code est alors inutile.
+    period : int
+        écart de temps maximal entre deux DPE successifs avant de considérer que des rénovations énergétiques ont pu avoir lieu.
+    dep_code : TYPE, optional
+        code du departement, si national_scale = False. The default is None.
 
+    Returns
+    -------
+    None
+    """
 
-
-def plotly_sankey(dep_code, period):
     
     departement = Departement(dep_code)
     output_folder_sankey = os.path.join('output', '2. sankey diagram')
     os.makedirs(output_folder_sankey, exist_ok=True)
     
-    df_epc_evolution = filter_manipulated(dep_code, plot_surface_evolution = False, period = period)
+    # Définition du dataframe des paires de DPE à considérer
+    if national_scale:
+        df_epc_evolution = filter_manipulated_national(period)
+    else:
+        df_epc_evolution = filter_manipulated(dep_code, period)
+    
     # todo : rajouter ici un delete_dpe_copies ?
         
     # Décompte des transitions entre chaque paire de classes DPE
@@ -860,23 +931,20 @@ def plotly_sankey(dep_code, period):
         )
     ))
     
-    # Personnaliser la disposition pour séparer les deux groupes de nœuds
+    
+    if national_scale:
+        title_text=f"Transitions de classes entre DPE successifs, France hexagonale, N={len(df_epc_evolution)}, écart max. entre DPE = {period} jours)"
+    else : 
+        title_text=f"Transitions de classes entre DPE successifs ({departement.name} - {departement.code}, N={len(df_epc_evolution)}, écart max. entre DPE = {period} jours)"
+    
+    # Personnalisation de la disposition pour séparer les deux groupes de nœuds
     fig.update_layout(
-        title_text=f"Transitions de classes entre DPE successifs ({departement.name} - {departement.code}, N={len(df_epc_evolution)}, écart max. entre DPE = {period} jours)",
+        title_text=title_text,
         font_size=30,
         title_font_size=30,
         #font_color = 'black', 
-        font_shadow = "auto", # 'None' si pas d'ombre
-        #font_family='Arial Black' # todo: que mettre ?
-        # todo : mettre label a l'exterieur
-    )
-    
-    
-    # todo : enregistrer figure (pb avec kaleido)
-    # save_name = f"Transitions de classes entre DPE successifs ({departement.name} - {departement.code}, N={len(df_epc_evolution)}, period = {period} jours).png"
-    # fig.write_image(os.path.join(output_folder_sankey,save_name))
-    # pio.savefig(os.path.join(output_folder_sankey,save_name), bbox_inches='tight')
-
+        font_shadow = "auto", # 'None' si pas d'ombre autour des labels
+        )
     
     fig.show()
     
@@ -1068,7 +1136,7 @@ def download_all_dpe_json(df_epc_evolution):
     Returns
     -------
     ensemble_dpe : set
-        Ensemble des DPEs présents dans la table df_epc_evolution.
+        Ensemble des DPE présents dans la table df_epc_evolution.
     """
     
     output_folder_dpe_details = os.path.join('data', 'DPE', 'JSON')
@@ -1130,7 +1198,7 @@ def diff_dpe_data(dpe_id1,dpe_id2):
 
 def compare_dpe_data(dpe_id1,dpe_id2): # todo : inutile mtn qu'on a syntax = symmetric ?
     """
-    Création d'un DataFrame pour comparer les variables modifiées entre deux DPEs successifs. Ne tient pas compte des variables finales issues de calculs (conso_5_usages etc)
+    Création d'un DataFrame pour comparer les variables modifiées entre deux DPE successifs. Ne tient pas compte des variables finales issues de calculs (conso_5_usages etc)
 
     Parameters
     ----------
@@ -1162,7 +1230,7 @@ def compare_dpe_data(dpe_id1,dpe_id2): # todo : inutile mtn qu'on a syntax = sym
     
     df_changing_variables = pd.DataFrame(index = list_changing_variables)
     
-    # Jointure des détails des DPEs successifs
+    # Jointure des détails des DPE successifs
     df_dpe1 = pd.DataFrame().from_dict(json_dpe1['results'][0], orient='index', columns =['First DPE'])
     df_dpe2 = pd.DataFrame().from_dict(json_dpe2['results'][0], orient='index', columns =['Second DPE'])
 
@@ -1177,7 +1245,7 @@ def compare_dpe_data(dpe_id1,dpe_id2): # todo : inutile mtn qu'on a syntax = sym
 
 def delete_dpe_copies(dep_code, period): # todo : prendre plutot df_epc_evolution en argument ? changer le nom
     """
-    Nettoie df_epc_evolution en enlevant les DPEs successifs qui sont en réalité identiques.
+    Nettoie df_epc_evolution en enlevant les DPE successifs qui sont en réalité identiques.
 
     Parameters
     ----------
@@ -1187,7 +1255,7 @@ def delete_dpe_copies(dep_code, period): # todo : prendre plutot df_epc_evolutio
     Returns
     -------
     df_epc_evolution : pandas DataFrame
-        DataFrame des paires de DPEs successifs avec ajout d'une colonne "dpe_diff" listant les champs modifiés.
+        DataFrame des paires de DPE successifs avec ajout d'une colonne "dpe_diff" listant les champs modifiés.
     """
     
     # Récupération des DPE successifs effectués LE MEME JOUR (period = 0) #todo modifier ce commentaire
@@ -1216,7 +1284,7 @@ def delete_dpe_copies(dep_code, period): # todo : prendre plutot df_epc_evolutio
             if liste_dpe_diff_ligne == []:
                 df_epc_evolution.drop(labels=index, inplace = True)
             else:
-                liste_dpe_diff.append(liste_dpe_diff_ligne) # liste des champs modifiés entre les deux DPEs
+                liste_dpe_diff.append(liste_dpe_diff_ligne) # liste des champs modifiés entre les deux DPE
 
     df_epc_evolution["dpe_diff"] = liste_dpe_diff # todo : pas top de faire ça car on est pas sûr que la ligne corresponde bien a l'index ? ce serait mieux de manipuler les df directement
     # todo: transformer liste_dpe_diff en série qu'on ajoutera a la fin au dataframe
@@ -1236,7 +1304,7 @@ def hist_champs_modifies(dep_code, period, filter_dpe = None, top_n = None):
     departement = Departement(dep_code)
     df_epc_evolution = delete_dpe_copies(dep_code, period = period)
     
-    # Filtrage des DPEs qui sont passés dans une meilleure classe ou inversement
+    # Filtrage des DPE qui sont passés dans une meilleure classe ou inversement
     if filter_dpe == 'better_dpe_only':
         df_epc_evolution = df_epc_evolution[df_epc_evolution.second_epc < df_epc_evolution.first_epc]
     elif filter_dpe == 'worse_dpe_only':
@@ -1381,7 +1449,7 @@ def main():
     output_folder = os.path.join('output',today)
     os.makedirs(output_folder, exist_ok=True)
     
-    
+    national_scale = True
     dep_code = '91'
     departement = Departement(dep_code)
     
@@ -1416,38 +1484,29 @@ def main():
         france = France()
         for dep in tqdm.tqdm(france.departements):
             dep_code = dep.code
-            filter_bdnb_individual(dep_code, force=False)
+            filter_bdnb_individual(dep_code=dep_code, force=False)
     
     
     # graphe de passage heatmap
-    if False:        
-        plot_heatmap(dep_code, frequency=True, period = 40)
+    if True:        
+        plot_heatmap(national_scale=national_scale, dep_code=dep_code, frequency=True, period = period)
         
     # Sankey diagram with Plotly
     if False: 
-        plotly_sankey(dep_code, 30)
+        plotly_sankey(national_scale=national_scale, period=period, dep_code=dep_code)
         
-    # Sankey diagram with pySankey
+    # Sankey diagram with pySankey (ne met pas les classes énergétiques dans l'ordre...)
     if False:
-        
         df_epc_evolution = filter_manipulated(dep_code)
-        
-        fig = sankey(df_epc_evolution["first_epc"], df_epc_evolution["second_epc"], aspect=20, colorDict = etiquette_colors_dict, fontsize=12)
+        sankey(df_epc_evolution["first_epc"], df_epc_evolution["second_epc"], aspect=20, colorDict = etiquette_colors_dict, fontsize=12)
 
-        # Get current figure
-        # fig = plt.gcf()
+
+    # Plot histogramme variable_diff
+    if False:
+        variable = 'epc_cons'
+        ecart_relatif = False
         
-# =============================================================================
-#         # Set size in inches
-#         fig.set_size_inches(6, 6)
-#         
-#         # Set the color of the background to white
-#         fig.set_facecolor("w")
-# =============================================================================
-        
-        # Save the figure
-        save_name = 'sankey_diagram_evolution_dpe_successifs_{dep_code}'
-        fig.savefig(save_name, bbox_inches="tight", dpi=150)
+        plot_variable_diff(national_scale=national_scale, period=period, dep_code=dep_code, variable=variable, ecart_relatif = ecart_relatif)
 
     
     # Download DPE details
@@ -1469,16 +1528,15 @@ def main():
         dpe_id1 = '2191E0101828Z'
         dpe_id2 = '2191E0102146F'
         
-        # dpes avec $insert dans dpe_diff
+        # DPE avec $insert dans dpe_diff
         dpe_id1 = '2291E1697414S'
         dpe_id2 = '2291E1746964M'
         #test= diff_dpe_data(dpe_id1, dpe_id2)
         
     # influence des variations d'une variable sur conso_5_usages_ep_m2
-    if True:
+    if False:
         variable = 'surface'
         regplot_influence_variable(dep_code=dep_code, variable=variable, period=period, display_class=False, relatif=True, non_zero_variation_only=True)
-    
 
             
     if False:
