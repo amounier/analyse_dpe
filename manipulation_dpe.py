@@ -20,14 +20,16 @@ pio.renderers.default='browser'
 import plotly.graph_objects as go
 from pySankey.sankey import sankey
 import json
-import jsondiff as jd
 from jsondiff import diff
 import tqdm
+from scipy.optimize import curve_fit
+import scipy.special as sc 
+from sklearn.metrics import r2_score
+
 
 from utils import etiquette_colors_dict, etiquette_ep_dict, etiquette_ep_seuils
 from administrative import Departement, France, draw_departement_map
 from download import get_bdnb
-#from distribution import cut_france_bunching # ne peux pas marcher car distribution a aussi besoin de manipulation_dpe
 
 
 def filter_bdnb_individual(dep_code, force):
@@ -163,10 +165,6 @@ def filter_manipulated(dep_code, period = 20):
     df_epc_evolution.rename(columns={"level_1": "numero_paire_de_dpe"}, inplace=True)
     df_epc_evolution.numero_paire_de_dpe = df_epc_evolution.numero_paire_de_dpe + 1
 
-    # ajout colonne des variables_diff # todo : supprimer car c'est fait dans plot_variable_diff ?
-    # df_epc_evolution = variable_diff(df_epc_evolution, variable = 'epc_cons') 
-    # df_epc_evolution = variable_diff(df_epc_evolution, variable = 'surface')
-
     return df_epc_evolution   
 
 
@@ -211,6 +209,186 @@ def filter_manipulated_national(period, force = False): # attention : prend du t
         df_epc_evolution_national = pd.read_csv(os.path.join(output_folder, save_name)) 
 
     return df_epc_evolution_national   
+
+
+
+# %% ANALYSE DES CHANGEMENTS DE CLASSES : HEATMAP ET DIAGRAMME DE SANKEY
+
+
+def plot_heatmap(national_scale, dep_code=None, frequency=True, period = 20):
+    """
+    Tracé de la heatmap de comparaison des paires de DPE successifs.
+
+    Parameters
+    ----------
+    national_scale : boolean
+        trace à l'échelle nationale (utilise filter_manipulated_national). Le paramètre dep_code est alors inutile.
+    dep_code : TYPE, optional
+        code du departement, si national_scale = False. The default is None.
+    period : int
+        écart de temps maximal entre deux DPE successifs avant de considérer que des rénovations énergétiques ont pu avoir lieu. 
+    frequency : boolean
+        if True, trace la heatmap en fréquence et non en absolu
+
+    Returns
+    -------
+    None
+    """
+    
+    if national_scale:
+        df_epc_evolution = filter_manipulated_national(period)
+    else:
+        departement = Departement(dep_code)
+        
+        # Version rapide non nettoyée
+        df_epc_evolution = filter_manipulated(dep_code, period = period)  
+        
+        # Version nettoyée des DPE en double : (beaucoup plus long car il faut télécharger tous les json) mais ne change pas grand chose --> a eviter
+        # df_epc_evolution = delete_dpe_copies(dep_code, plot_surface_evolution = False, period = period)
+    
+    # Décompte de la fréquence des transitions avec crosstab()
+    df_heatmap = pd.crosstab(
+        index=df_epc_evolution['second_epc'],  # Lignes = 2e DPE
+        columns=df_epc_evolution['first_epc'],  # Colonnes = 1er DPE
+    )
+    
+    # Remplissage des classes manquantes avec 0
+    classes = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
+    df_heatmap = df_heatmap.reindex(index=classes, columns=classes, fill_value=0)
+    if frequency:
+        df_heatmap = (df_heatmap/len(df_epc_evolution))*100        
+
+    # Pour afficher seulement les valeurs non nulles de la matrice
+    annot = df_heatmap
+    annot = np.round(annot, 1)
+    annot = np.where(annot != 0, annot, "")
+
+    # Tracé de la figure    
+    fig,ax = plt.subplots(figsize=(5,5), dpi=300)
+
+    cbar_ax = fig.add_axes([0, 0, 0.1, 0.1])
+    posn = ax.get_position()
+    cbar_ax.set_position([posn.x0+posn.width+0.02, posn.y0, 0.04, posn.height])
+    
+    if frequency:
+        ax = sns.heatmap(df_heatmap, ax=ax, vmin=0, vmax=25, annot=annot, fmt="", cmap='bone_r', cbar=True, cbar_ax=cbar_ax, cbar_kws={'label':'Pourcentage (%)'})
+    else:
+        ax = sns.heatmap(df_heatmap, ax=ax, annot=annot, fmt="", cmap='bone_r', cbar_ax=cbar_ax,cbar=True,cbar_kws={'label':"Nombre d'observations"})
+    
+    if national_scale==False: 
+        ax.set_title(f'Logements individuels, {departement.name} - {departement.code}\nPériode de {period} jours, N={len(df_epc_evolution)}')
+    for spine in ax.spines.values():
+        spine.set_visible(True)
+    for spine in cbar_ax.spines.values():
+        spine.set_visible(True)
+    ax.set_ylabel('Second DPE')
+    ax.set_xlabel('Premier DPE')
+    
+    
+    # Définition du chemin de sauvegarde des heatmap
+    output_folder_heatmap = os.path.join('output', '1. heatmap')
+    os.makedirs(output_folder_heatmap, exist_ok=True)
+    
+    # Enregistrement de la figure
+    if national_scale : 
+        save_name = f'DPE_manipulation_classes_national_sur_{period}_jours.png'
+    else : 
+        save_name = f'DPE_manipulation_classes_{dep_code}_sur_{period}_jours.png'
+    if frequency:
+        save_name = save_name.replace('.png','_frequency.png')
+
+    plt.savefig(os.path.join(output_folder_heatmap,save_name), bbox_inches='tight')
+    
+    plt.show()
+
+    return 
+
+
+
+def plotly_sankey(national_scale, period, dep_code=None):
+    """
+    Tracé du diagramme de Sankey de l'évolution des classes énergétiques entre DPE successifs dans une fenêtre web.
+
+    Parameters
+    ----------
+    national_scale : boolean
+        trace à l'échelle nationale (utilise filter_manipulated_national). Le paramètre dep_code est alors inutile.
+    period : int
+        écart de temps maximal entre deux DPE successifs avant de considérer que des rénovations énergétiques ont pu avoir lieu.
+    dep_code : TYPE, optional
+        code du departement, si national_scale = False. The default is None.
+
+    Returns
+    -------
+    None
+    """
+
+    
+    departement = Departement(dep_code)
+    output_folder_sankey = os.path.join('output', '2. sankey diagram')
+    os.makedirs(output_folder_sankey, exist_ok=True)
+    
+    # Définition du dataframe des paires de DPE à considérer
+    if national_scale:
+        df_epc_evolution = filter_manipulated_national(period)
+    else:
+        df_epc_evolution = filter_manipulated(dep_code, period)
+            
+    # Décompte des transitions entre chaque paire de classes DPE
+    transition_counts = df_epc_evolution.groupby(['first_epc', 'second_epc']).size().reset_index(name='count')
+    
+    # Labels des noeuds (7 initiaux + 7 finaux)
+    labels = [f"{classe}_initial" for classe in ['A', 'B', 'C', 'D', 'E', 'F', 'G']] + [f"{classe}_final" for classe in ['A', 'B', 'C', 'D', 'E', 'F', 'G']]
+    label_to_index = {label: idx for idx, label in enumerate(labels)} # indices correspondants à chaque noeud
+    
+    sources = transition_counts['first_epc'].map(lambda x: label_to_index[f"{x}_initial"])
+    targets = transition_counts['second_epc'].map(lambda x: label_to_index[f"{x}_final"])
+    values = transition_counts['count']
+    
+    # Couleur des noeuds
+    node_colors = etiquette_colors_dict.values()
+    # Conversion en format RGBA
+    node_colors_rgba = [f"rgba({int(r*255)}, {int(g*255)}, {int(b*255)}, 1)" for r, g, b in node_colors]
+    
+    # Couleur de chaque lien en fonction de sa classe initiale
+    link_colors = transition_counts['first_epc'].map(etiquette_colors_dict)
+    # Conversion en format RGBA (opacité à 0.8)
+    link_colors_rgba = [f"rgba({int(r*255)}, {int(g*255)}, {int(b*255)}, 0.8)" for r, g, b in link_colors]
+    
+    
+    fig = go.Figure(go.Sankey(
+        arrangement = 'snap',
+        node=dict(
+            label=[label.replace("_initial", "").replace("_final", "") for label in labels],
+            color= node_colors_rgba + node_colors_rgba
+        ),
+        link=dict(
+            source=sources,
+            target=targets,
+            value=values,
+            color=link_colors_rgba 
+        )
+    ))
+    
+    
+    if national_scale:
+        title_text=f"Transitions de classes entre DPE successifs, France hexagonale, N={len(df_epc_evolution)}, écart max. entre DPE = {period} jours)"
+    else : 
+        title_text=f"Transitions de classes entre DPE successifs ({departement.name} - {departement.code}, N={len(df_epc_evolution)}, écart max. entre DPE = {period} jours)"
+    
+    # Personnalisation de la disposition pour séparer les deux groupes de nœuds
+    fig.update_layout(
+        title_text=title_text,
+        font_size=30,
+        title_font_size=30,
+        #font_color = 'black', 
+        font_shadow = "auto", # 'None' si pas d'ombre autour des labels
+        )
+    
+    fig.show()
+    
+    return
+
 
 
 # %% ANALYSE DE L'EVOLUTION DE CERTAINES VARIABLES ENTRE DPE SUCCESSIFS
@@ -392,32 +570,147 @@ def plot_variable_diff(national_scale, period, dep_code=None, variable='epc_cons
     return 
 
 
-# %% 
+# %% COMPARAISON DES DISTRIBUTIONS DES 1ER DPE VS 2ND DPE
 
-def plot_distrib_dpe_sucessifs(national_scale, period, dep_code='91', max_xlim =600):
+def plot_distrib_dpe_sucessifs(national_scale, period, dep_code=None, max_xlim =600):
+    """
+    Tracé de la superposition des distributions des permiers et seconds DPE.
+
+    Parameters
+    ----------
+    national_scale : boolean
+        trace à l'échelle nationale (utilise filter_manipulated_national). Le paramètre dep_code est alors inutile.
+    period : int
+        écart de temps maximal entre deux DPE successifs avant de considérer que des rénovations énergétiques ont pu avoir lieu.
+    dep_code : TYPE, optional
+        code du departement, si national_scale = False. The default is None.
+    max_xlim : int, optional
+        limite du graphe. The default is 600.
+
+    Returns
+    -------
+    None
+    """
+    
     if national_scale:
         df_epc_evolution = filter_manipulated_national(period)
     else:
-        df_epc_evolution = filter_manipulated(dep_code, period)
+        df_epc_evolution = filter_manipulated(dep_code, period) # remarque : pas assez de points pour que la courbe soit jolie
         departement = Departement(dep_code)
     
     bins = list(range(0,round(max(df_epc_evolution.epc_cons_1))))
     fig, ax = plt.subplots(figsize=(5,5), dpi=300)
     df_epc_evolution.hist('epc_cons_1', bins=bins, ax=ax, label = 'Premiers DPE', color= 'r', alpha = 0.6, grid=False)
     df_epc_evolution.hist('epc_cons_2', bins=bins, ax=ax, label = 'Seconds DPE', color= 'blue', alpha = 0.5, grid=False)
-    if national_scale:
-        ax.set_title(f"Ensemble des départements sur {period} jours, N={len(df_epc_evolution)}")
-    else:
-        ax.set_title(f"{departement.name} - {departement.code} sur {period} jours, N={len(df_epc_evolution)}")
+    ax.set_title(None)
+    if national_scale==False:
+        ax.set_title(f"{departement.name} - {departement.code}, N={len(df_epc_evolution)}")
     ax.set_ylabel("Nombre d'observations")
     ax.set_xlabel("Consommation annuelle en énergie primaire (kWh.m$^{-2}$)")
     ax.set_xticks(ticks=[int(x) for x in list(set(list(np.asarray(list(etiquette_ep_dict.values())).flatten()))) if not np.isinf(x)] + [max_xlim])
     ax.set_xlim(0, max_xlim)
     # plt.grid(False, alpha=0.3, zorder=-1)
     plt.legend()
-    plt.show()
+    
+    # Enregistrement de la figure
+    output_folder = os.path.join('output', '3. distrib_dpe_successifs')
+    os.makedirs(output_folder, exist_ok=True)
+    
+    save_name = f'Comparaison_distrib_DPE_successifs_{period}_jours_dep{dep_code}.png'
+    if national_scale:
+        save_name = save_name.replace(f'dep{dep_code}.png','national.png')
+    plt.savefig(os.path.join(output_folder,save_name), bbox_inches='tight')
+    
+    plt.show()    
     
     return
+
+
+
+def fit_dpe_data(dpe_data, verbose=True): # copie adaptée de fit_dpe_data (distribution.py)
+    """
+    Fit de la distribution des DPE
+
+    Parameters
+    ----------
+    verbose : boolean
+        affiche les print lors du run de la fonction. 
+
+    Returns
+    -------
+    fit_dpe_data_df : pandas DataFrame
+        Fit de la distribution des DPE = densité de probabilité des consommations d'énergie primaire
+        Colonnes : x_data (filtré tq zscore<3)  |  y_data_norm (distribution normalisée)  |  y_beta_curve_fit (fit de y_data_norm)  |  y_beta_curve_fit_scale_up (non normalisé)
+    r2_value : float
+        Coefficient de régression entre le curve_fit et les données réelles
+    param : array of floats --> array([ a, b, loc])
+        Paramètres alpha, beta et loc de la distribution beta fitée sur les données DPE.
+    nb_dpe_filtre : int
+        nombre de DPE restants une fois qu'on a enlevé les zscore > 3 pour le fit
+    """
+    
+    dpe_data = dpe_data.map(round)
+    nb_dpe = len(dpe_data)
+    counter_dict = dict(dpe_data.value_counts())
+    counter_dict_sorted = {k: v for k, v in sorted(counter_dict.items(), key=lambda item: item[0])} 
+
+    x_data = np.array(list(counter_dict_sorted.keys()))  
+    
+    # Filtrage des valeurs extrêmes de consommations d'énergie primaire
+    filtre = zscore(x_data)<3 
+    
+    x_data = x_data[filtre]
+    if verbose: 
+        print(f'Le curve_fit ne prend pas en compte les DPE supérieurs à {x_data.max()} kWh/m2 (Z score > 3)')
+    
+    
+    y_data = np.array(list(counter_dict_sorted.values()))[filtre]
+    
+    # Calcul du nombre de DPE une fois qu'on a filtré les zscore(x_data)<3 (à faire avant de normaliser y_data par nb_dpe)
+    nb_dpe_filtre = y_data.sum()
+    
+    y_data_norm = y_data/nb_dpe
+    y_data_norm = y_data_norm/y_data_norm.sum() # afin que l'aire sous la courbe soit bien =1
+    
+    
+    # Création d'un DataFrame pour stocker les données
+    fit_dpe_data_df = pd.DataFrame({'x_data':x_data, 'y_data':y_data, 'y_data_norm':y_data_norm})
+    
+    
+    scale = x_data.max()
+    
+    def beta_pdf(x, a, b, loc):
+        x_norm = (x - loc) / scale
+        x_norm = x_norm.clip(min=0,max=None)
+        res = np.power(x_norm,(a-1)) * np.power((1-x_norm),(b-1)) /sc.beta(a,b)/scale
+        return res
+
+
+    # Estimation initiale des paramètres de la distribution beta
+    alpha_first_guess = 4
+    loc_first_guess = 0
+    beta_first_guess =  alpha_first_guess / ((x_data - loc_first_guess)/x_data.max()).mean() - alpha_first_guess
+    first_guess = (alpha_first_guess, beta_first_guess, loc_first_guess) 
+    
+    param, cov = curve_fit(beta_pdf, x_data, y_data_norm, first_guess, method='trf', bounds=(0, +np.inf), maxfev=10000)  # la méthode trf fonctionne bien 
+    a, b, loc = param 
+    if verbose: 
+        print('Paramètres de la loi beta du curve_fit (a, b, loc, cov) :', a, b, loc, cov)
+
+
+    fit_dpe_data_df['y_beta_curve_fit'] = beta_pdf(x_data, a, b, loc)
+
+    # ajout d'une colonne non normalisée du beta_fit --> on repasse à l'échelle initiale
+    fit_dpe_data_df['y_beta_curve_fit_scale_up'] = fit_dpe_data_df.y_beta_curve_fit * nb_dpe_filtre
+
+    # calcul du R2 entre les données et le curve_fit
+    r2_value = r2_score(fit_dpe_data_df['y_data_norm'],fit_dpe_data_df['y_beta_curve_fit'])
+    if verbose: 
+        print("R2 data/curve_fit =", r2_value)
+                    
+    
+    return fit_dpe_data_df, r2_value, param, nb_dpe_filtre 
+
 
 
 
@@ -427,16 +720,18 @@ def formatage_dpe_successifs_data(df_epc_evolution, window_size):
 
     Parameters
     ----------
-    df_epc_evolution : TYPE
+    df_epc_evolution : pandas Dataframe
         DESCRIPTION.
-    window_size : TYPE
-        DESCRIPTION.
+    window_size : int
+        taille de la fenêtre de glissement pour le rolling. 
 
     Returns
     -------
     df_dpe_successifs : pandas DataFrame
-        DESCRIPTION.
+        Décompte du nombre de DPE par valeur de conso. energétique, calcul des moyennes glissantes (rolling) et des moyennes normalisées par nb_dpe.
+        Colonnes :  conso_5_usages_ep_m2 (index)  |  count_epc_cons_1  |  count_epc_cons_2  |  diff_distrib_dpe_sucessifs  |  moyenne_distrib_1  |  moyenne_distrib_2  |  y_diff_moyenne_norm_1  |  y_diff_moyenne_norm_abs_1  |  y_diff_moyenne_norm_2  |  y_diff_moyenne_norm_abs_2
     """
+    
     nb_dpe = len(df_epc_evolution)
     
     # Initialisation d'un dataframe des conso_5_usages
@@ -459,14 +754,54 @@ def formatage_dpe_successifs_data(df_epc_evolution, window_size):
     # Différence des deux distributions
     df_dpe_successifs['diff_distrib_dpe_sucessifs'] = df_dpe_successifs.count_epc_cons_2 - df_dpe_successifs.count_epc_cons_1 
     
-    # Moyenne glissante de chacune des distribution
+    
+    # DISTRIBUTION BETA
+    
+        # Premiers DPE
+        
+    dpe_data_1 = df_epc_evolution.epc_cons_1
+    fit_dpe_data_df_1, r2_value, param, nb_dpe_filtre = fit_dpe_data(dpe_data_1, verbose=False)
+    fit_dpe_data_df_1 = fit_dpe_data_df_1.rename(columns={'x_data': 'conso_5_usages_ep_m2', 'y_data_norm':'y_data_norm_1','y_beta_curve_fit':'y_beta_curve_fit_1', 'y_beta_curve_fit_scale_up':'y_beta_curve_fit_scale_up_1'})
+
+    df_dpe_successifs = pd.merge(
+        df_dpe_successifs, 
+        fit_dpe_data_df_1[['conso_5_usages_ep_m2', 'y_data_norm_1','y_beta_curve_fit_1','y_beta_curve_fit_scale_up_1']], 
+        on='conso_5_usages_ep_m2', 
+        how='left')
+
+        # Seconds DPE
+        
+    dpe_data_2 = df_epc_evolution.epc_cons_2
+    fit_dpe_data_df_2, r2_value, param, nb_dpe_filtre = fit_dpe_data(dpe_data_2, verbose=False)
+    fit_dpe_data_df_2 = fit_dpe_data_df_2.rename(columns={'x_data': 'conso_5_usages_ep_m2', 'y_data_norm':'y_data_norm_2','y_beta_curve_fit':'y_beta_curve_fit_2', 'y_beta_curve_fit_scale_up':'y_beta_curve_fit_scale_up_2'})
+
+    df_dpe_successifs = pd.merge(
+        df_dpe_successifs, 
+        fit_dpe_data_df_2[['conso_5_usages_ep_m2', 'y_data_norm_2','y_beta_curve_fit_2','y_beta_curve_fit_scale_up_2']], 
+        on='conso_5_usages_ep_m2', 
+        how='left')
+
+        # Différence entre les données et le curve_fit
+        
+    df_dpe_successifs = df_dpe_successifs.fillna(0)
+    
+    df_dpe_successifs['y_diff_beta_norm_1'] = df_dpe_successifs.y_data_norm_1 - df_dpe_successifs.y_beta_curve_fit_1 # différence entre les données premiers DPE et le curve fit
+    df_dpe_successifs['y_diff_beta_norm_abs_1'] = df_dpe_successifs['y_diff_beta_norm_1'].abs()
+    
+    df_dpe_successifs['y_diff_beta_norm_2'] = df_dpe_successifs.y_data_norm_2 - df_dpe_successifs.y_beta_curve_fit_2 # différence entre les données seconds DPE et le curve fit
+    df_dpe_successifs['y_diff_beta_norm_abs_2'] = df_dpe_successifs['y_diff_beta_norm_2'].abs()
+    
+    
+    # MOYENNE GLISSANTE
+    
+        # Moyenne glissante de chacune des distribution
     rolling_dpe = df_dpe_successifs['count_epc_cons_1'].rolling(window=window_size, min_periods=1, center=True) 
     df_dpe_successifs["moyenne_distrib_1"] = rolling_dpe.mean()  
     
     rolling_dpe = df_dpe_successifs['count_epc_cons_2'].rolling(window=window_size, min_periods=1, center=True) 
     df_dpe_successifs["moyenne_distrib_2"] = rolling_dpe.mean()  
     
-    # Normalisation par nb total de DPE
+        # Normalisation par nb total de DPE
     df_dpe_successifs['y_diff_moyenne_norm_1'] = (df_dpe_successifs.count_epc_cons_1 - df_dpe_successifs.moyenne_distrib_1)/nb_dpe 
     df_dpe_successifs['y_diff_moyenne_norm_abs_1'] = df_dpe_successifs['y_diff_moyenne_norm_1'].abs() 
     df_dpe_successifs['y_diff_moyenne_norm_2'] = (df_dpe_successifs.count_epc_cons_2 - df_dpe_successifs.moyenne_distrib_2)/nb_dpe 
@@ -477,39 +812,87 @@ def formatage_dpe_successifs_data(df_epc_evolution, window_size):
 
 
 
-def plot_diff_distrib_dpe_successifs(period, max_xlim=600): # echelle nationale
+def plot_diff_distrib_dpe_successifs(period, plot_curve_fit, window_size, max_xlim=600): 
+    """
+    Tracé des distributions des premiers DPE et seconds DPE et de leur moyenne glissante (échelle nationale)
+
+    Parameters
+    ----------
+    period : int
+        écart de temps maximal entre deux DPE successifs avant de considérer que des rénovations énergétiques ont pu avoir lieu.
+    window_size : int
+        taille de la fenêtre de glissement pour le rolling. 
+    max_xlim : int, optional
+        limite du graphe. The default is 600.
+
+    Returns
+    -------
+    None
+    """
+
     
+    # Définition du chemin de sauvegarde des figures
+    output_folder = os.path.join('output', '3. distrib_dpe_successifs') 
+    os.makedirs(output_folder, exist_ok=True)
+
+
     df_epc_evolution = filter_manipulated_national(period)
-    df_dpe_successifs = formatage_dpe_successifs_data(df_epc_evolution)
+    df_dpe_successifs = formatage_dpe_successifs_data(df_epc_evolution, window_size=window_size)
+    
+    # PREMIERS DPE
     
     fig, ax = plt.subplots(figsize=(5,5), dpi=300)
     # ax.plot(df_dpe_successifs.index, df_dpe_successifs.diff_distrib_dpe_sucessifs, color=plt.get_cmap('viridis')(0.1), linewidth = 0.7)
+    ax.plot(df_dpe_successifs.index, df_dpe_successifs.count_epc_cons_1, color=plt.get_cmap('viridis')(0.1), linewidth = 0.7, label = 'Premiers DPE')
+    ax.plot(df_dpe_successifs.index, df_dpe_successifs.moyenne_distrib_1,"k", label='Moyenne', linewidth = 1)
     
-    ax.plot(df_dpe_successifs.index, df_dpe_successifs.count_epc_cons_1, color=plt.get_cmap('viridis')(0.1), linewidth = 0.7, label = 'premiers DPE')
-    ax.plot(df_dpe_successifs.index, df_dpe_successifs.moyenne_distrib_1,"k", label='moyenne', linewidth = 1)
-
-    
-    # ax.plot(df_dpe_successifs.index, df_dpe_successifs.count_epc_cons_2, color=plt.get_cmap('viridis')(0.1), linewidth = 0.7, label = 'seconds DPE')
-    # ax.plot(df_dpe_successifs.index, df_dpe_successifs.moyenne_distrib_2,"k", label='moyenne', linewidth = 1)
-
+    if plot_curve_fit:
+        dpe_data_1 = df_epc_evolution.epc_cons_1
+        fit_dpe_data_df_1, r2_value, param, nb_dpe_filtre = fit_dpe_data(dpe_data_1, verbose=True)
+        x_data = fit_dpe_data_df_1['x_data']
+        pdf = fit_dpe_data_df_1['y_beta_curve_fit_scale_up']
+        ax.plot(x_data, pdf, "k--", label=f'curve_fit\n(R$^{{2}}$={r2_value:.2f})')
     
     ax.set_xlim([0,max_xlim])
-    ax.set_ylim([0,800])
-
-    # ax.hlines(y=0, xmin=0, linewidth = 1, xmax=max_xlim, color='k', alpha=0.4, zorder=-1) # tracé de l'axe y=0 en arrière-plan
-    ax.set_ylabel("Nombre de DPE de différence")
+    ax.set_ylim([0,830])
+    
+    ax.set_ylabel("Nombre d'observations")
     ax.set_xlabel("Consommation annuelle en énergie primaire (kWh.m$^{-2}$)")
     ax.set_xticks(ticks=[int(x) for x in list(set(list(np.asarray(list(etiquette_ep_dict.values())).flatten()))) if not np.isinf(x)] + [max_xlim])
-    ax.set_title(f"Ensemble des départements sur {period} jours, N={len(df_epc_evolution)}")
-    plt.legend()     
+    # ax.set_title(f"Ensemble des départements sur {period} jours, N={len(df_epc_evolution)}")
+    plt.legend()  
     
-    # # Définition du chemin de sauvegarde des histogrammes des champs modifiés
-    # output_folder = os.path.join('output', '') #todo : modifier
-    # os.makedirs(output_folder, exist_ok=True)
-
-    # # Enregistrement de la figure
-    # save_path = os.path.join(output_folder,f'diff_distrib_dpe_successifs.png')
-    # plt.savefig(save_path, bbox_inches='tight')
+    # Enregistrement de la figure
+    save_path = os.path.join(output_folder,f'distrib_premiers_dpe_{period}_jours.png')
+    plt.savefig(save_path, bbox_inches='tight')
+    
+    # SECONDS DPE
+    
+    fig, ax = plt.subplots(figsize=(5,5), dpi=300)
+    ax.plot(df_dpe_successifs.index, df_dpe_successifs.count_epc_cons_2, color=plt.get_cmap('viridis')(0.1), linewidth = 0.7, label = 'Seconds DPE')
+    ax.plot(df_dpe_successifs.index, df_dpe_successifs.moyenne_distrib_2,"k", label='Moyenne', linewidth = 1)
+    
+    if plot_curve_fit:
+        dpe_data_2 = df_epc_evolution.epc_cons_2
+        fit_dpe_data_df_2, r2_value, param, nb_dpe_filtre = fit_dpe_data(dpe_data_2, verbose=True)
+        x_data = fit_dpe_data_df_2['x_data']
+        pdf = fit_dpe_data_df_2['y_beta_curve_fit_scale_up']
+        ax.plot(x_data, pdf, "k--", label=f'curve_fit\n(R$^{{2}}$={r2_value:.2f})')
+    
+    ax.set_xlim([0,max_xlim])
+    ax.set_ylim([0,830])
+    
+    ax.set_ylabel("Nombre d'observations")
+    ax.set_xlabel("Consommation annuelle en énergie primaire (kWh.m$^{-2}$)")
+    ax.set_xticks(ticks=[int(x) for x in list(set(list(np.asarray(list(etiquette_ep_dict.values())).flatten()))) if not np.isinf(x)] + [max_xlim])
+    # ax.set_title(f"Ensemble des départements sur {period} jours, N={len(df_epc_evolution)}")
+    plt.legend()  
+    
+    # Enregistrement de la figure
+    save_path = os.path.join(output_folder,f'distrib_seconds_dpe_{period}_jours.png')
+    plt.savefig(save_path, bbox_inches='tight')
+    
+    
     plt.show()
     plt.close()
     
@@ -520,88 +903,156 @@ def plot_diff_distrib_dpe_successifs(period, max_xlim=600): # echelle nationale
 
 def calcul_bunching_dpe_successifs(df_epc_evolution, seuils, itv_bunching, window_size):
     
-    df_dpe_successifs = formatage_dpe_successifs_data(df_epc_evolution, window_size=window_size)
     
-    # méthode différence simple (utilisée par Civel et al. 2025)
+    def cut_bunching(bunching_df, seuils): # copie adaptée de cut_france_bunching (distribution.py)
+        """
+        Rogne le DataFrame bunching_df pour ne conserver que les colonnes correspondant aux seuils demandés.
+    
+        Parameters
+        ----------
+        bunching_df : panda DataFrame
+            dataframe du bunching à chaque seuil (colonnes du type '{seuil}_method_{method}')
+        seuils : list
+            liste des colonnes seuils à conserver dans bunching_df_cut.
+    
+        Returns
+        -------
+        bunching_df_cut : panda DataFrame
+            DataFrame bunching_df rogné.
+        seuils_sans_slash : str
+            chaîne de caractère simplifiée pour identifier les seuils.
+        """
+            
+        # formatage d'une chaîne de caractère simplifiée pour identifier les seuils
+        seuils_sans_slash = '_'.join(seuils)
+        seuils_sans_slash = seuils_sans_slash.replace("/","")
+        
+        # implémentation d'une liste du nom exact des colonnes de bunching_df à sélectionner
+        noms_colonnes_seuils = []
+        for seuil in seuils:
+            colonne_seuil = [colonne for colonne in bunching_df.columns if colonne.startswith(f'{seuil}')]
+            nom_colonne = colonne_seuil[0]
+            noms_colonnes_seuils.append(nom_colonne)
+    
+        bunching_df_cut = bunching_df.filter(items = noms_colonnes_seuils)  
+        
+        return bunching_df_cut, seuils_sans_slash
+    
+    
+    df_dpe_successifs = formatage_dpe_successifs_data(df_epc_evolution, window_size=window_size)
+    nb_dpe = len(df_epc_evolution)
+    
+    # Initialisation d'un DataFrame
+    bunching_dpe_succ = pd.DataFrame(index=['Premiers DPE', 'Seconds DPE']) 
+
+
+    # Méthode différence simple (utilisée par Civel et al. 2025)
     
     method ='diff_simple'
     
-    bunching_dpe_succ = pd.DataFrame(index=[0]) # initialisation d'un DataFrame
-    
-    bunching = 0
-    
+    bunching_diff_simple = pd.DataFrame(index=['Premiers DPE', 'Seconds DPE'])
     for seuil in seuils:
         valeur_seuil = etiquette_ep_seuils[seuil]
-        print(bunching_dpe_succ)
-        
-        nb_gauche = df_dpe_successifs[(df_dpe_successifs.index > valeur_seuil-itv_bunching) & (df_dpe_successifs.index <= valeur_seuil)].sum()
-        nb_droite = df_dpe_successifs[(df_dpe_successifs.index > valeur_seuil) & (df_dpe_successifs.index <= valeur_seuil+itv_bunching)].sum() # todo : pb il faut dire quelle colonne
 
+        nb_gauche = df_dpe_successifs[(df_dpe_successifs.index > valeur_seuil-itv_bunching) & (df_dpe_successifs.index <= valeur_seuil)].sum(axis=0).filter(items=['count_epc_cons_1', 'count_epc_cons_2'])
+        nb_droite = df_dpe_successifs[(df_dpe_successifs.index > valeur_seuil) & (df_dpe_successifs.index <= valeur_seuil+itv_bunching)].sum(axis=0).filter(items=['count_epc_cons_1', 'count_epc_cons_2'])
         diff_simple = (nb_gauche - nb_droite) / (nb_gauche+nb_droite) 
-        bunching += diff_simple
-
-        bunching_dpe_succ['diff_simple'] += diff_simple
+        diff_simple.rename({'count_epc_cons_1': 'Premiers DPE', 'count_epc_cons_2': 'Seconds DPE'}, inplace=True)
         
-        
-    method ='diff_moyenne'
-      
-# =============================================================================
-#     # Initialisation des DataFrame
-#     bunching_df = pd.DataFrame(index=['Premier DPE','Second DPE'])
-#     # bunching_df_2 = pd.DataFrame(index=[0]) 
-#     
-#     for k, seuil in etiquette_ep_seuils.items():
-#         # Création d'un DataFrame filtré sur l'intervalle à +-{itv_bunching} du seuil
-#         df_dpe_successifs_filtered = df_dpe_successifs[(df_dpe_successifs.index  > seuil-itv_bunching) & (df_dpe_successifs.index <= seuil + itv_bunching)]
-#         
-#         # Ajout d'une colonne correspondante au seuil dans le bunching DataFrame 
-#         bunching_df[1][f'{k}_method_{method}'] = df_dpe_successifs_filtered['y_diff_moyenne_norm_abs_1'].sum() 
-#         bunching_df_2[f'{k}_method_{method}'] = df_dpe_successifs_filtered['y_diff_moyenne_norm_abs_2'].sum() 
-# 
-#     bunching_df_cut, seuils_sans_slash = cut_france_bunching(bunching_df, seuils)
-#     
-# =============================================================================
+        bunching_diff_simple[f'{seuil}_{method}'] = diff_simple
     
+    bunching_dpe_succ[f'{method}'] = bunching_diff_simple.sum(axis=1)
+        
+    
+    
+    # Méthode différence simple, normalisée par N
+
+    method ='diff_simple_nb_dpe'
+    
+    bunching_diff_simple_nb_dpe = pd.DataFrame(index=['Premiers DPE', 'Seconds DPE'])
+    for seuil in seuils:
+        valeur_seuil = etiquette_ep_seuils[seuil]
+
+        nb_gauche = df_dpe_successifs[(df_dpe_successifs.index > valeur_seuil-itv_bunching) & (df_dpe_successifs.index <= valeur_seuil)].sum(axis=0).filter(items=['count_epc_cons_1', 'count_epc_cons_2'])
+        nb_droite = df_dpe_successifs[(df_dpe_successifs.index > valeur_seuil) & (df_dpe_successifs.index <= valeur_seuil+itv_bunching)].sum(axis=0).filter(items=['count_epc_cons_1', 'count_epc_cons_2'])
+        diff_simple_nb_dpe = (nb_gauche - nb_droite) / nb_dpe
+        diff_simple_nb_dpe.rename({'count_epc_cons_1': 'Premiers DPE', 'count_epc_cons_2': 'Seconds DPE'}, inplace=True)
+        
+        bunching_diff_simple_nb_dpe[f'{seuil}_{method}'] = diff_simple_nb_dpe
+    
+    bunching_dpe_succ[f'{method}'] = bunching_diff_simple_nb_dpe.sum(axis=1)
+    
+    
+    
+    # Méthode écart à une distribution bêta
+    
+    method ='diff_beta'
+      
     # Initialisation des DataFrame
     bunching_df_1 = pd.DataFrame(index=[0])
     bunching_df_2 = pd.DataFrame(index=[0]) 
     
-    for k, seuil in etiquette_ep_seuils.items():
+    for seuil, valeur_seuil in etiquette_ep_seuils.items():
         # Création d'un DataFrame filtré sur l'intervalle à +-{itv_bunching} du seuil
-        df_dpe_successifs_filtered = df_dpe_successifs[(df_dpe_successifs.index  > seuil-itv_bunching) & (df_dpe_successifs.index <= seuil + itv_bunching)]
+        df_dpe_successifs_filtered = df_dpe_successifs[(df_dpe_successifs.index  > valeur_seuil-itv_bunching) & (df_dpe_successifs.index <= valeur_seuil + itv_bunching)]
         
         # Ajout d'une colonne correspondante au seuil dans le bunching DataFrame 
-        bunching_df_1[f'{k}_method_{method}'] = df_dpe_successifs_filtered['y_diff_moyenne_norm_abs_1'].sum() 
-        bunching_df_2[f'{k}_method_{method}'] = df_dpe_successifs_filtered['y_diff_moyenne_norm_abs_2'].sum() 
+        bunching_df_1[f'{seuil}_method_{method}'] = df_dpe_successifs_filtered['y_diff_beta_norm_abs_1'].sum() 
+        bunching_df_2[f'{seuil}_method_{method}'] = df_dpe_successifs_filtered['y_diff_beta_norm_abs_2'].sum() 
 
-    # bunching_df_1[:, [3:6]]
-    bunching_df_cut_1, seuils_sans_slash = cut_france_bunching(bunching_df_1, seuils)
-    bunching_premier_dpe = bunching_df_cut_1.iloc[0].sum() #axis=1) 
-    bunching_df_cut_2, seuils_sans_slash = cut_france_bunching(bunching_df_2, seuils)
+
+    bunching_df_cut_1, seuils_sans_slash = cut_bunching(bunching_df_1, seuils)
+    bunching_dpe_succ.loc['Premiers DPE', f'{method}'] = bunching_df_cut_1.iloc[0].sum()
+    bunching_df_cut_2, seuils_sans_slash = cut_bunching(bunching_df_2, seuils)
+    bunching_dpe_succ.loc['Seconds DPE', f'{method}'] = bunching_df_cut_2.iloc[0].sum()
+    
+    
+    
+    # Méthode écart à la moyenne glissante
+    
+    method ='diff_moyenne'
+      
+    # Initialisation des DataFrame
+    bunching_df_1 = pd.DataFrame(index=[0])
+    bunching_df_2 = pd.DataFrame(index=[0]) 
+    
+    for seuil, valeur_seuil in etiquette_ep_seuils.items():
+        # Création d'un DataFrame filtré sur l'intervalle à +-{itv_bunching} du seuil
+        df_dpe_successifs_filtered = df_dpe_successifs[(df_dpe_successifs.index  > valeur_seuil-itv_bunching) & (df_dpe_successifs.index <= valeur_seuil + itv_bunching)]
+        
+        # Ajout d'une colonne correspondante au seuil dans le bunching DataFrame 
+        bunching_df_1[f'{seuil}_method_{method}'] = df_dpe_successifs_filtered['y_diff_moyenne_norm_abs_1'].sum() 
+        bunching_df_2[f'{seuil}_method_{method}'] = df_dpe_successifs_filtered['y_diff_moyenne_norm_abs_2'].sum() 
+
+
+    bunching_df_cut_1, seuils_sans_slash = cut_bunching(bunching_df_1, seuils)
+    bunching_premier_dpe = bunching_df_cut_1.iloc[0].sum()
+    bunching_df_cut_2, seuils_sans_slash = cut_bunching(bunching_df_2, seuils)
     bunching_second_dpe = bunching_df_cut_2.iloc[0].sum()
 
     print('Bunching méthode diff_moyenne sur la distribution des premier DPE :', bunching_premier_dpe)
     print('Bunching méthode diff_moyenne sur la distribution des second DPE :', bunching_second_dpe)
 
-    pourcent_variation_bunching = (bunching_second_dpe - bunching_premier_dpe)/ bunching_premier_dpe *100
-    print(f'Augmentation du bunching de {pourcent_variation_bunching:.2f} %')
+    # pourcent_variation_bunching = (bunching_second_dpe - bunching_premier_dpe)/ bunching_premier_dpe *100
+    # print(f'Augmentation du bunching de {pourcent_variation_bunching:.2f} %')
     
-    return
+    
+    bunching_dpe_succ.loc['Premiers DPE', f'{method}'] = bunching_premier_dpe
+    bunching_dpe_succ.loc['Seconds DPE', f'{method}'] = bunching_second_dpe
+
+    
+
+    # Calcul du pourcentage de variation du bunching entre les deux distributions
+    bunching_dpe_succ = bunching_dpe_succ.transpose()
+    bunching_dpe_succ['pourcent_variation_bunching'] = (bunching_dpe_succ['Seconds DPE'] - bunching_dpe_succ['Premiers DPE'])/ bunching_dpe_succ['Premiers DPE'] *100
+    bunching_dpe_succ = bunching_dpe_succ.transpose()
+
+    
+    return bunching_dpe_succ
 
 
-# =============================================================================
-# NE SERT A RIEN CAR ON A DEJA PLOT VARIABLE DIFF 
-# def plot_distrib_ecart_conso(national_scale, period, dep_code='91', max_xlim =600):
-#     if national_scale:
-#         df_epc_evolution = filter_manipulated_national(period)
-#     else:
-#         df_epc_evolution = filter_manipulated(dep_code, period)
-#         departement = Departement(dep_code)
-#     
-#     
-#     
-#     return
-# =============================================================================
+
+# %% ANALYSE GAIN D'ETIQUETTES
 
 
 def plot_gain_period(national_scale, dep_code='91', period_max=120, bins_size = 5):
@@ -770,188 +1221,8 @@ def dicts_dep_gain_moyen_etiquette(period, save_json=False):
     
 
 
-# %% HEATMAP ET DIAGRAMME DE SANKEY
 
-
-def plot_heatmap(national_scale, dep_code=None, frequency=True, period = 20):
-    """
-    Tracé de la heatmap de comparaison des paires de DPE successifs.
-
-    Parameters
-    ----------
-    national_scale : boolean
-        trace à l'échelle nationale (utilise filter_manipulated_national). Le paramètre dep_code est alors inutile.
-    dep_code : TYPE, optional
-        code du departement, si national_scale = False. The default is None.
-    period : int
-        écart de temps maximal entre deux DPE successifs avant de considérer que des rénovations énergétiques ont pu avoir lieu. 
-    frequency : boolean
-        if True, trace la heatmap en fréquence et non en absolu
-
-    Returns
-    -------
-    None
-    """
-    
-    if national_scale:
-        df_epc_evolution = filter_manipulated_national(period)
-    else:
-        departement = Departement(dep_code)
-        
-        # Version rapide non nettoyée
-        df_epc_evolution = filter_manipulated(dep_code, period = period)  
-        
-        # Version nettoyée des DPE en double : (beaucoup plus long car il faut télécharger tous les json) mais ne change pas grand chose --> a eviter
-        # df_epc_evolution = delete_dpe_copies(dep_code, plot_surface_evolution = False, period = period)
-    
-    # Décompte de la fréquence des transitions avec crosstab()
-    df_heatmap = pd.crosstab(
-        index=df_epc_evolution['second_epc'],  # Lignes = 2e DPE
-        columns=df_epc_evolution['first_epc'],  # Colonnes = 1er DPE
-    )
-    
-    # Remplissage des classes manquantes avec 0
-    classes = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
-    df_heatmap = df_heatmap.reindex(index=classes, columns=classes, fill_value=0)
-    if frequency:
-        df_heatmap = (df_heatmap/len(df_epc_evolution))*100        
-
-    # Pour afficher seulement les valeurs non nulles de la matrice
-    annot = df_heatmap
-    annot = np.round(annot, 1)
-    annot = np.where(annot != 0, annot, "")
-
-    # Tracé de la figure    
-    fig,ax = plt.subplots(figsize=(5,5), dpi=300)
-
-    cbar_ax = fig.add_axes([0, 0, 0.1, 0.1])
-    posn = ax.get_position()
-    cbar_ax.set_position([posn.x0+posn.width+0.02, posn.y0, 0.04, posn.height])
-    
-    if frequency:
-        ax = sns.heatmap(df_heatmap, ax=ax, vmin=0, vmax=25, annot=annot, fmt="", cmap='bone_r', cbar=True, cbar_ax=cbar_ax, cbar_kws={'label':'Pourcentage (%)'})
-    else:
-        ax = sns.heatmap(df_heatmap, ax=ax, annot=annot, fmt="", cmap='bone_r', cbar_ax=cbar_ax,cbar=True,cbar_kws={'label':"Nombre d'observations"})
-    
-    if national_scale==False: 
-        ax.set_title(f'Logements individuels, {departement.name} - {departement.code}\nPériode de {period} jours, N={len(df_epc_evolution)}')
-    for spine in ax.spines.values():
-        spine.set_visible(True)
-    for spine in cbar_ax.spines.values():
-        spine.set_visible(True)
-    ax.set_ylabel('Second DPE')
-    ax.set_xlabel('Premier DPE')
-    
-    
-    # Définition du chemin de sauvegarde des heatmap
-    output_folder_heatmap = os.path.join('output', '1. heatmap')
-    os.makedirs(output_folder_heatmap, exist_ok=True)
-    existing_files = os.listdir(output_folder_heatmap)
-    
-    # Enregistrement de la figure
-    if national_scale : 
-        save_name = f'DPE_manipulation_classes_national_sur_{period}_jours.png'
-    else : 
-        save_name = f'DPE_manipulation_classes_{dep_code}_sur_{period}_jours.png'
-    if frequency:
-        save_name = save_name.replace('.png','_frequency.png')
-
-    plt.savefig(os.path.join(output_folder_heatmap,save_name), bbox_inches='tight')
-    
-    plt.show()
-
-    return 
-
-
-
-def plotly_sankey(national_scale, period, dep_code=None):
-    """
-    Tracé du diagramme de Sankey de l'évolution des classes énergétiques entre DPE successifs dans une fenêtre web.
-
-    Parameters
-    ----------
-    national_scale : boolean
-        trace à l'échelle nationale (utilise filter_manipulated_national). Le paramètre dep_code est alors inutile.
-    period : int
-        écart de temps maximal entre deux DPE successifs avant de considérer que des rénovations énergétiques ont pu avoir lieu.
-    dep_code : TYPE, optional
-        code du departement, si national_scale = False. The default is None.
-
-    Returns
-    -------
-    None
-    """
-
-    
-    departement = Departement(dep_code)
-    output_folder_sankey = os.path.join('output', '2. sankey diagram')
-    os.makedirs(output_folder_sankey, exist_ok=True)
-    
-    # Définition du dataframe des paires de DPE à considérer
-    if national_scale:
-        df_epc_evolution = filter_manipulated_national(period)
-    else:
-        df_epc_evolution = filter_manipulated(dep_code, period)
-    
-    # todo : rajouter ici un delete_dpe_copies ?
-        
-    # Décompte des transitions entre chaque paire de classes DPE
-    transition_counts = df_epc_evolution.groupby(['first_epc', 'second_epc']).size().reset_index(name='count')
-    
-    # Labels des noeuds (7 initiaux + 7 finaux)
-    labels = [f"{classe}_initial" for classe in ['A', 'B', 'C', 'D', 'E', 'F', 'G']] + [f"{classe}_final" for classe in ['A', 'B', 'C', 'D', 'E', 'F', 'G']]
-    label_to_index = {label: idx for idx, label in enumerate(labels)} # indices correspondants à chaque noeud
-    
-    sources = transition_counts['first_epc'].map(lambda x: label_to_index[f"{x}_initial"])
-    targets = transition_counts['second_epc'].map(lambda x: label_to_index[f"{x}_final"])
-    values = transition_counts['count']
-    
-    # Couleur des noeuds
-    node_colors = etiquette_colors_dict.values()
-    # Conversion en format RGBA
-    node_colors_rgba = [f"rgba({int(r*255)}, {int(g*255)}, {int(b*255)}, 1)" for r, g, b in node_colors]
-    
-    # Couleur de chaque lien en fonction de sa classe initiale
-    link_colors = transition_counts['first_epc'].map(etiquette_colors_dict)
-    # Conversion en format RGBA (opacité à 0.8)
-    link_colors_rgba = [f"rgba({int(r*255)}, {int(g*255)}, {int(b*255)}, 0.8)" for r, g, b in link_colors]
-    
-    
-    fig = go.Figure(go.Sankey(
-        arrangement = 'snap',
-        node=dict(
-            label=[label.replace("_initial", "").replace("_final", "") for label in labels],
-            color= node_colors_rgba + node_colors_rgba
-        ),
-        link=dict(
-            source=sources,
-            target=targets,
-            value=values,
-            color=link_colors_rgba 
-        )
-    ))
-    
-    
-    if national_scale:
-        title_text=f"Transitions de classes entre DPE successifs, France hexagonale, N={len(df_epc_evolution)}, écart max. entre DPE = {period} jours)"
-    else : 
-        title_text=f"Transitions de classes entre DPE successifs ({departement.name} - {departement.code}, N={len(df_epc_evolution)}, écart max. entre DPE = {period} jours)"
-    
-    # Personnalisation de la disposition pour séparer les deux groupes de nœuds
-    fig.update_layout(
-        title_text=title_text,
-        font_size=30,
-        title_font_size=30,
-        #font_color = 'black', 
-        font_shadow = "auto", # 'None' si pas d'ombre autour des labels
-        )
-    
-    fig.show()
-    
-    return
-
-
-# %%
+# %% ANALYSE DES CHAMPS MODIFIES ENTRE DPE SUCCESSIFS
 
 
 # Définition des champs à ne pas prendre en compte car non manipulable directement par les diagnostiqueurs pour influencer les calculs
@@ -1363,7 +1634,7 @@ def hist_champs_modifies(dep_code, period, filter_dpe = None, top_n = None):
 
 def regplot_influence_variable(dep_code, variable, period, display_class, relatif, non_zero_variation_only):
     # todo : regression sans prendre en compte variation de surface nulle ?
-    
+    # todo : déplacer cette fonction plus haut
     departement = Departement(dep_code)
     df_epc_evolution = filter_manipulated(dep_code, period = period)    
     
@@ -1450,14 +1721,18 @@ def main():
     os.makedirs(output_folder, exist_ok=True)
     
     national_scale = True
-    dep_code = '91'
+    dep_code = '85'
     departement = Departement(dep_code)
     
     period = 20 # jours d'écart maximal entre deux DPE successifs
     top_n = 10 # nombre de champs affichés sur l'histogramme des champs modifiés
     
-
-    # test type_batiment_dpe=='maison' MAIS “nb_log”=!1 
+    # Paramètres pour le calcul du bunching des distributions des DPE successifs
+    itv_bunching = 10
+    window_size = 50
+    seuils = ['D/E', 'E/F', 'F/G']
+    
+    # Test type_batiment_dpe=='maison' MAIS “nb_log”=!1 
     if False:
         test_dpe_logement, test_rel_batiment_groupe_dpe_logement, test_batiment_groupe_compile = get_bdnb(dep_code)
     
@@ -1479,6 +1754,7 @@ def main():
         test_filter_individual = test_join_id_dpe.merge(test_dpe_logement, how='inner', on='identifiant_dpe') # on conserve seulement les DPE méthode 3CL 2021 correspondant aux maisons
         df_bug_maison = test_filter_individual[test_filter_individual.ffo_bat_nb_log != 1]
 
+
     # Enregistrement de la bdnb filtrée sur les logements individuels pour tous les départements
     if False:
         france = France()
@@ -1487,8 +1763,10 @@ def main():
             filter_bdnb_individual(dep_code=dep_code, force=False)
     
     
+    ### ANALYSE DES CHANGEMENTS DE CLASSES
+    
     # graphe de passage heatmap
-    if True:        
+    if False:        
         plot_heatmap(national_scale=national_scale, dep_code=dep_code, frequency=True, period = period)
         
     # Sankey diagram with Plotly
@@ -1501,6 +1779,8 @@ def main():
         sankey(df_epc_evolution["first_epc"], df_epc_evolution["second_epc"], aspect=20, colorDict = etiquette_colors_dict, fontsize=12)
 
 
+    ### ANALYSE DE L'EVOLUTION DE VARIABLES ENTRE DPE SUCCESSIFS
+
     # Plot histogramme variable_diff
     if False:
         variable = 'epc_cons'
@@ -1509,12 +1789,25 @@ def main():
         plot_variable_diff(national_scale=national_scale, period=period, dep_code=dep_code, variable=variable, ecart_relatif = ecart_relatif)
 
     
+    ### COMPARAISON DISTRIBUTIONS DPE SUCCESSIFS
+
+    if False:
+        plot_distrib_dpe_sucessifs(national_scale=national_scale, period=period, dep_code=dep_code, max_xlim =600)
+        plot_diff_distrib_dpe_successifs(period=period, plot_curve_fit=False, window_size=window_size, max_xlim=600)
+
+    # Calcul du bunching associé aux deux distributions (échelle nationale)
+    if True:        
+        df_epc_evolution = filter_manipulated_national(period)
+        bunching_dpe_succ = calcul_bunching_dpe_successifs(df_epc_evolution, seuils, itv_bunching, window_size)
+        print(bunching_dpe_succ)
+
+    ### ANALYSE DES CHAMPS MODIFIES
+
     # Download DPE details
     if False: 
         download_dpe_json('2591E2079598F')
         # download_dpe_json('2275E2157068C') # 14 brillat savarin
         
-    # analyse des champs modifiés
     if False:  
         # filter_bdnb_individual('33',True)
         # filter_bdnb_individual('44',True)

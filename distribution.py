@@ -150,7 +150,7 @@ def fit_dpe_data(dep_code, method='curve_fit', old_built_filter=False, verbose=T
     -------
     fit_dpe_data_df : pandas DataFrame
         Fit de la distribution du département = densité de probabilité des consommations d'énergie primaire dans le dep
-        Colonnes : x_data (filtré tq zscore<3)  |  y_data_norm (distribution normalisée)  |  y_beta_curve_fit (fit de y_data_norm)
+        Colonnes : x_data (filtré tq zscore<3)  |  y_data_norm (distribution normalisée)  |  y_beta_curve_fit (fit de y_data_norm)  |  y_beta_curve_fit_scale_up (non normalisé)
     r2_value : float
         Coefficient de régression entre le curve_fit et les données réelles
     param : array of floats --> array([ a, b, loc])
@@ -950,7 +950,7 @@ def calcul_nb_dpe_filtre(old_built_filter):
 
 def get_nb_dpe(old_built_filter=True,seuils=['D/E', 'E/F', 'F/G']):
     '''
-    Calcule le nb de DPE total dans l'ensemble des classes de la liste seuil (donc à partir du plus petit seuil).
+    Calcule le nb de DPE total dans l'ensemble des classes de la liste seuil (à partir du plus petit seuil jusqu'au plus grand, donc dans les classes D à G dans le seuils par défaut).
     
     Parameters
     ----------
@@ -976,10 +976,13 @@ def get_nb_dpe(old_built_filter=True,seuils=['D/E', 'E/F', 'F/G']):
         counter_dict = dict(dpe_data.conso_5_usages_ep_m2.value_counts())
         
         min_seuil = np.inf
+        max_seuil = -np.inf
         for s in seuils :
             min_seuil = min(min_seuil,etiquette_ep_dict.get(s.split('/')[0])[0])
+            max_seuil = max(max_seuil,etiquette_ep_dict.get(s.split('/')[1])[1])
+            # print(min_seuil, max_seuil)
             
-        nb_dpe = sum([nb for s,nb in counter_dict.items() if s>=min_seuil])
+        nb_dpe = sum([nb for s,nb in counter_dict.items() if (s>=min_seuil and s<=max_seuil)])
         dict_dep_nb_dpe_filtre[dep] = nb_dpe 
         
     return dict_dep_nb_dpe_filtre 
@@ -1085,8 +1088,8 @@ def main():
     output_folder = os.path.join('output',today)
     os.makedirs(output_folder, exist_ok=True)
     
-    dep = Departement('59')
-    old_built_filter = False
+    dep = Departement('26')
+    old_built_filter = True
     window_size = 50  # fenêtre de la moyenne glissante (rolling de la méthode 'diff_moyenne')
     
     
@@ -1112,7 +1115,7 @@ def main():
     
     
     # calcul du bunching du département
-    if False:
+    if True:
         bunching_dep = calcul_bunching(dep.code, method=method, itv_bunching=itv_bunching, window_size=window_size, plot_ecart = True, path=output_folder, old_built_filter=old_built_filter, verbose=True)
         
         # Affichage somme du bunching sur l'ensemble des seuils
@@ -1211,7 +1214,7 @@ def main():
             plt.close()
             
             # Regplot entre bunching et nb_dpe_filtre
-            if True: # todo : creer une fonction qui fait ça cut_france
+            if True: # todo : creer une fonction qui fait ça (cut_france)
                 
                 df_bunching = pd.DataFrame().from_dict(dict_dep_bunching, orient='index', columns=[f'Somme_seuils_{seuils_sans_slash}_method_{method}'])
                 
