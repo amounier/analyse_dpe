@@ -1529,7 +1529,7 @@ def delete_dpe_copies(dep_code, period): # todo : prendre plutot df_epc_evolutio
         DataFrame des paires de DPE successifs avec ajout d'une colonne "dpe_diff" listant les champs modifiés.
     """
     
-    # Récupération des DPE successifs effectués LE MEME JOUR (period = 0) #todo modifier ce commentaire
+    # Récupération des DPE successifs effectués dans un intervalle de temps strictement inférieur à périod
     df_epc_evolution = filter_manipulated(dep_code, period = period)
     
     
@@ -1572,6 +1572,7 @@ def plot_nb_champs_modifies(dep_code, period): #todo : enlever insert et delete
 
 def hist_champs_modifies(dep_code, period, filter_dpe = None, top_n = None):
     
+    
     departement = Departement(dep_code)
     df_epc_evolution = delete_dpe_copies(dep_code, period = period)
     
@@ -1583,7 +1584,7 @@ def hist_champs_modifies(dep_code, period, filter_dpe = None, top_n = None):
     
     # Dépliage de la colonne de listes en autant de lignes qu'il y a d'éléments par liste
     df_exploded = df_epc_evolution.explode('dpe_diff')
-    # Décompte des occurrences de chaque champ2491E0874510Q
+    # Décompte des occurrences de chaque champ
     counts = df_exploded['dpe_diff'].value_counts() #ascending = True)
     counts.drop(index = set_admin_and_geog, inplace = True, errors='ignore')
     
@@ -1592,14 +1593,14 @@ def hist_champs_modifies(dep_code, period, filter_dpe = None, top_n = None):
     
     # Tracé histogramme (bar chart) des {top_n} champs les plus fréquemment modifiés
     # Titre figure : Champs les plus modifiés entre deux DPE successifs de moins de {period} jours\n{departement.name} - {departement.code}, N={len(df_epc_evolution)}
-    fig,ax = plt.subplots(figsize=(10, 2/10*len(counts_norm.head(top_n))))                  
+    fig,ax = plt.subplots(figsize=(10, 3/10*len(counts_norm.head(top_n))))                  
     counts_norm.head(top_n).plot(kind='barh')
     if filter_dpe == 'better_dpe_only': 
         ax.set_title(f'DPE successifs améliorés en moins de {period} jours ({departement.name} - {departement.code}, N={len(df_epc_evolution)})\n ')
-    elif filter_dpe == 'worse_dpe_only': # todo: changer titre car pas convaincue
-        ax.set_title(f'DPE successifs empirés en moins de {period} jours ({departement.name} - {departement.code}, N={len(df_epc_evolution)})\n ')
+    elif filter_dpe == 'worse_dpe_only': 
+        ax.set_title(f'DPE successifs dépréciés en moins de {period} jours ({departement.name} - {departement.code}, N={len(df_epc_evolution)})\n ')
     else :   
-        ax.set_title(f'{departement.name} - {departement.code}, N={len(df_epc_evolution)}. period = {period} jours') #, fontsize=10)
+        ax.set_title(f'{departement.name} - {departement.code}, N={len(df_epc_evolution)}, period = {period} jours') #, fontsize=10)
         # fig.suptitle(f'DPE successifs de moins de {period} jours ({departement.name} - {departement.code}, N={len(df_epc_evolution)})\n ') #, fontsize=10)
     ax.set_xlabel("Nombre d'occurrences (%)")
     ax.set_ylabel(None)
@@ -1613,10 +1614,9 @@ def hist_champs_modifies(dep_code, period, filter_dpe = None, top_n = None):
     # Définition du chemin de sauvegarde des histogrammes des champs modifiés
     output_folder_ACM = os.path.join('output', '5. analyse_champs_modifies')
     os.makedirs(output_folder_ACM, exist_ok=True)
-    existing_files = os.listdir(output_folder_ACM)
     
     # Enregistrement de la figure
-    save_name = f'Hist_champs_modifies_sur_{period}_jours_dep_{dep_code}.pdf'
+    save_name = f'Hist_champs_modifies_sur_{period}_jours_dep_{dep_code}_top_{top_n}.pdf'
     if filter_dpe == 'better_dpe_only':
         save_name = save_name.replace('.pdf','_better_dpe_only.pdf')
     elif filter_dpe == 'worse_dpe_only':
@@ -1633,7 +1633,6 @@ def hist_champs_modifies(dep_code, period, filter_dpe = None, top_n = None):
 
 
 def regplot_influence_variable(dep_code, variable, period, display_class, relatif, non_zero_variation_only):
-    # todo : regression sans prendre en compte variation de surface nulle ?
     # todo : déplacer cette fonction plus haut
     departement = Departement(dep_code)
     df_epc_evolution = filter_manipulated(dep_code, period = period)    
@@ -1691,7 +1690,6 @@ def regplot_influence_variable(dep_code, variable, period, display_class, relati
     # Définition du chemin de sauvegarde des histogrammes des champs modifiés
     output_folder_ACM = os.path.join('output', '5. analyse_champs_modifies')
     os.makedirs(output_folder_ACM, exist_ok=True)
-    existing_files = os.listdir(output_folder_ACM)
     
     # Enregistrement de la figure
     save_name = f'Correlation_{variable}_et_conso_energ_periode_{period}_jours_dep_{dep_code}.png'
@@ -1721,11 +1719,11 @@ def main():
     os.makedirs(output_folder, exist_ok=True)
     
     national_scale = True
-    dep_code = '85'
+    dep_code = '59'
     departement = Departement(dep_code)
     
     period = 20 # jours d'écart maximal entre deux DPE successifs
-    top_n = 10 # nombre de champs affichés sur l'histogramme des champs modifiés
+    top_n = None # nombre de champs affichés sur l'histogramme des champs modifiés
     
     # Paramètres pour le calcul du bunching des distributions des DPE successifs
     itv_bunching = 10
@@ -1796,7 +1794,7 @@ def main():
         plot_diff_distrib_dpe_successifs(period=period, plot_curve_fit=False, window_size=window_size, max_xlim=600)
 
     # Calcul du bunching associé aux deux distributions (échelle nationale)
-    if True:        
+    if False:        
         df_epc_evolution = filter_manipulated_national(period)
         bunching_dpe_succ = calcul_bunching_dpe_successifs(df_epc_evolution, seuils, itv_bunching, window_size)
         print(bunching_dpe_succ)
@@ -1808,7 +1806,7 @@ def main():
         download_dpe_json('2591E2079598F')
         # download_dpe_json('2275E2157068C') # 14 brillat savarin
         
-    if False:  
+    if True:  
         # filter_bdnb_individual('33',True)
         # filter_bdnb_individual('44',True)
         # filter_bdnb_individual('69',True)
@@ -1817,7 +1815,7 @@ def main():
         hist_champs_modifies(dep_code, period = period, top_n = top_n) #filter_dpe='worse_dpe_only')
         dpe_id1 = '2591E2951057W' # dpe au json vide
         
-        # dpe qui se ressemblent
+        # DPE qui se ressemblent
         dpe_id1 = '2191E0101828Z'
         dpe_id2 = '2191E0102146F'
         
